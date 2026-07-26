@@ -1,0 +1,41 @@
+{
+  "name": "plaud-backend",
+  "version": "1.0.0",
+  "description": "AI voice-recorder backend (STT + RAG over meetings) - NestJS/TypeScript/ESM",
+  "type": "module",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "start:dev": "tsc-watch --onSuccess \"node dist/main.js\"",
+    "migrate": "node dist/scripts/run-migrations.js",
+    "typeorm": "typeorm-ts-node-esm"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1095.0",
+    "@aws-sdk/s3-request-presigner": "^3.1095.0",
+    "@nestjs/bull": "^10.2.1",
+    "@nestjs/common": "^10.4.4",
+    "@nestjs/config": "^3.2.3",
+    "@nestjs/core": "^10.4.4",
+    "@nestjs/platform-express": "^10.4.4",
+    "@nestjs/typeorm": "^10.0.2",
+    "bull": "^4.16.3",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "dotenv": "^16.4.5",
+    "multer": "^1.4.5-lts.1",
+    "music-metadata": "^7.14.0",
+    "openai": "^4.63.0",
+    "pg": "^8.13.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "typeorm": "^0.3.20"
+  },
+  "devDependencies": {
+    "@types/multer": "^1.4.12",
+    "@types/node": "^20.16.10",
+    "tsc-watch": "^6.2.0",
+    "typescript": "^5.6.2"
+  }
+}
