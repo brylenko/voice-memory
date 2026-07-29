@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Transcription Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; display: flex; flex-direction: column; align-items: center; min-height: 100vh; padding: 40px 20px; }
+    h1 { font-size: 1.4rem; font-weight: 600; margin-bottom: 8px; color: #fff; }
+    .subtitle { font-size: 0.85rem; color: #666; margin-bottom: 24px; }
+    .user-row { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; }
+    .user-row label { font-size: 0.8rem; color: #888; }
+    .user-row input { background: #1a1a1a; border: 1px solid #333; border-radius: 6px; color: #e0e0e0; padding: 6px 10px; font-size: 0.85rem; width: 300px; }
+    .controls { display: flex; gap: 12px; margin-bottom: 24px; }
+    button { padding: 12px 28px; border: none; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
+    button:disabled { opacity: 0.35; cursor: default; }
+    #startBtn { background: #2563eb; color: #fff; }
+    #stopBtn  { background: #dc2626; color: #fff; }
+    .status { font-size: 0.8rem; color: #888; margin-bottom: 20px; min-height: 20px; }
+    .status.active { color: #22c55e; }
+    .status.error  { color: #ef4444; }
+    #meter { width: 260px; height: 6px; background: #222; border-radius: 3px; margin-bottom: 24px; overflow: hidden; }
+    #meterFill { height: 100%; width: 0%; background: #2563eb; border-radius: 3px; transition: width 0.05s; }
+    .box { width: 100%; max-width: 700px; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 20px; min-height: 120px; }
+    .box h2 { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #555; margin-bottom: 12px; }
+    #liveText { font-size: 1rem; line-height: 1.7; color: #d1d5db; white-space: pre-wrap; word-break: break-word; }
+    .divider { width: 100%; max-width: 700px; border: none; border-top: 1px solid #222; margin: 20px 0; }
+    #fullText { font-size: 0.95rem; line-height: 1.7; color: #9ca3af; white-space: pre-wrap; word-break: break-word; }
+    .badge { display: inline-block; font-size: 0.7rem; padding: 2px 8px; border-radius: 99px; margin-left: 8px; vertical-align: middle; }
+    .badge.rec { background: #dc2626; color: #fff; animation: pulse 1s infinite; }
+    .track-badge { font-size: 0.75rem; color: #4b5563; margin-top: 10px; font-family: monospace; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  </style>
+</head>
+<body>
+  <h1>Live Transcription <span id="recBadge"></span></h1>
+  <p class="subtitle">WebSocket → OpenAI Realtime API → текст в реальному часі</p>
+
+  <div class="user-row">
+    <label for="userIdInput">User UUID:</label>
+    <input id="userIdInput" type="text" placeholder="вставте UUID з таблиці users" />
+  </div>
+
+  <div class="controls">
+    <button id="startBtn">▶ Почати запис</button>
+    <button id="stopBtn" disabled>■ Зупинити</button>
+  </div>
+
+  <p class="status" id="status">Натисни «Почати запис» і дозволь доступ до мікрофону</p>
+
+  <div id="meter"><div id="meterFill"></div></div>
+
+  <div class="box">
+    <h2>Live транскрипція</h2>
+    <div id="liveText"><span style="color:#444">Тут з'явиться текст…</span></div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="box">
+    <h2>Повний текст (після завершення)</h2>
+    <div id="fullText"><span style="color:#444">—</span></div>
+    <div class="track-badge" id="trackBadge"></div>
+  </div>
+
+<script>
+const TARGET_SAMPLE_RATE = 24000;
+
+let ws = null, audioCtx = null, mediaStream = null, processor = null;
+let meterInterval = null, analyser = null;
+let accumulated = '';
+
+const startBtn   = document.getElementById('startBtn');
+const stopBtn    = document.getElementById('stopBtn');
+const statusEl   = document.getElementById('status');
+const liveEl     = document.getElementById('liveText');
+const fullEl     = document.getElementById('fullText');
+const meterFill  = document.getElementById('meterFill');
+const recBadge   = document.getElementById('recBadge');
+const trackBadge = document.getElementById('trackBadge');
+const userIdInput= document.getElementById('userIdInput');
+
+// Persist userId in sessionStorage for convenience
+userIdInput.value = sessionStorage.getItem('streamUserId') ?? '';
+userIdInput.addEventListener('input', () => sessionStorage.setItem('streamUserId', userIdInput.value));
+
+function setStatus(msg, type = '') {
+  statusEl.textContent = msg;
+  statusEl.className = 'status ' + type;
+}
+
+function float32ToPcm16(float32Array) {
+  const buf = new ArrayBuffer(float32Array.length * 2);
+  const view = new DataView(buf);
+  for (let i = 0; i < float32Array.length; i++) {
+    const s = Math.max(-1, Math.min(1, float32Array[i]));
+    view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buf;
+}
+
+startBtn.addEventListener('click', async () => {
+  const userId = userIdInput.value.trim();
+  if (!userId) {
+    setStatus('Введи User UUID перед початком запису', 'error');
+    return;
+  }
+
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  } catch (e) {
+    setStatus('Немає доступу до мікрофону: ' + e.message, 'error');
+    return;
+  }
+
+  const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const wsUrl = `${wsProto}://${location.host}/audio/live?userId=${encodeURIComponent(userId)}`;
+  ws = new WebSocket(wsUrl);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen  = () => { console.log('[WS] open'); setStatus('З\'єднано з сервером. Говоріть!', 'active'); };
+  ws.onerror = (e) => { console.error('[WS] error', e); setStatus('WebSocket помилка', 'error'); };
+  ws.onclose = (e) => { console.log('[WS] close', e.code, e.reason); if (mediaStream) stop(false); };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'transcript') {
+      accumulated += msg.text;
+      liveEl.textContent = accumulated;
+    } else if (msg.type === 'done') {
+      const text = msg.fullText || accumulated;
+      liveEl.textContent = text;
+      fullEl.textContent = text;
+      trackBadge.textContent = msg.trackId ? `trackId: ${msg.trackId}` : '';
+      setStatus('Готово! Збережено в базу.', '');
+      stop(false);
+    } else if (msg.type === 'error') {
+      setStatus('Помилка: ' + msg.message, 'error');
+      stop(false);
+    }
+  };
+
+  audioCtx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+  const source = audioCtx.createMediaStreamSource(mediaStream);
+
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 512;
+  source.connect(analyser);
+  const meterBuf = new Uint8Array(analyser.frequencyBinCount);
+  meterInterval = setInterval(() => {
+    analyser.getByteFrequencyData(meterBuf);
+    const avg = meterBuf.reduce((a, b) => a + b, 0) / meterBuf.length;
+    meterFill.style.width = Math.min(100, avg * 2) + '%';
+  }, 50);
+
+  // 4096 = nearest power-of-two to 100ms @ 24 kHz
+  processor = audioCtx.createScriptProcessor(4096, 1, 1);
+  source.connect(processor);
+  processor.connect(audioCtx.destination);
+
+  processor.onaudioprocess = (e) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(float32ToPcm16(e.inputBuffer.getChannelData(0)));
+  };
+
+  accumulated = '';
+  liveEl.textContent = 'Слухаю…';
+  fullEl.innerHTML = '<span style="color:#444">—</span>';
+  trackBadge.textContent = '';
+  recBadge.innerHTML = '<span class="badge rec">● REC</span>';
+  startBtn.disabled = true;
+  stopBtn.disabled = false;
+});
+
+stopBtn.addEventListener('click', () => stop(true));
+
+function stop(sendEnd = true) {
+  if (processor)     { processor.disconnect(); processor = null; }
+  if (audioCtx)      { audioCtx.close(); audioCtx = null; }
+  if (mediaStream)   { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+  if (meterInterval) { clearInterval(meterInterval); meterInterval = null; }
+  meterFill.style.width = '0%';
+  recBadge.innerHTML = '';
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    if (sendEnd) {
+      ws.send('end');
+      // wait for server to send 'done' before closing — server closes after persist
+    } else {
+      ws.close();
+      ws = null;
+    }
+  } else {
+    ws = null;
+  }
+
+  startBtn.disabled = false;
+  stopBtn.disabled  = true;
+  if (sendEnd) setStatus('Обробляю…', 'active');
+}
+</script>
+</body>
+</html>

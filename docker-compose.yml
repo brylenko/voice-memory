@@ -1,0 +1,54 @@
+version: '3.8'
+services:
+  postgres:
+    image: ankane/pgvector:latest
+    environment:
+      POSTGRES_USER: plaud
+      POSTGRES_PASSWORD: plaud
+      POSTGRES_DB: plaud
+    ports:
+      - '5433:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U plaud -d plaud']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    # Secrets/keys (OPENAI_API_KEY, DEVICE_HMAC_SECRET, TELEGRAM_*, AWS_*, ...)
+    # come from your local .env file (copy .env.example -> .env first).
+    env_file:
+      - .env
+    environment:
+      # Inside the compose network, services reach each other by service name,
+      # not localhost — override just these two even if .env still says localhost.
+      DB_HOST: postgres
+      DB_PORT: 5432
+      REDIS_HOST: redis
+      UPLOAD_DIR: /app/uploads
+    ports:
+      - '3001:3000'
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  uploads_data:
