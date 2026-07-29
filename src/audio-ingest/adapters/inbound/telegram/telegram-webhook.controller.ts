@@ -13,8 +13,6 @@ import { TRANSCRIPTION_PORT, TranscriptionPort } from '../../../../ai/ports/tran
 import { INTENT_CLASSIFIER_PORT, IntentClassifierPort } from '../../../../ai/ports/intent-classifier.port';
 import { RagService } from '../../../../rag/rag.service';
 import { UserEntity } from '../../../../user/user.entity';
-import { AudioTrackEntity } from '../../../../audio-track/audio-track.entity';
-import type { ActionTask } from '../../../../audio-track/audio-track.entity';
 import { TasksService } from './tasks.service';
 
 @Controller('telegram')

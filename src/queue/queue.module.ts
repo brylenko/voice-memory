@@ -4,6 +4,7 @@ import { BullModule } from '@nestjs/bull';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AudioTrackEntity } from '../audio-track/audio-track.entity';
 import { AudioChunkEntity } from '../audio-chunk/audio-chunk.entity';
+import { UserEntity } from '../user/user.entity';
 import { AudioChunkRepository } from '../audio-chunk/audio-chunk.repository';
 import { AudioProcessorProcessor } from './audio-processor.processor';
 import { BackfillTasksCron } from './backfill-tasks.cron';
@@ -18,7 +19,7 @@ import { S3RetrievalAdapter } from './adapters/s3-retrieval.adapter';
 @Module({
   imports: [
     BullModule.registerQueue({ name: 'audio-processing' }),
-    TypeOrmModule.forFeature([AudioTrackEntity, AudioChunkEntity]),
+    TypeOrmModule.forFeature([AudioTrackEntity, AudioChunkEntity, UserEntity]),
     NotificationModule,
     CommonModule,
     AiModule,

@@ -1,13 +1,14 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
-export type DayOfWeek =
-  | 'monday'
-  | 'tuesday'
-  | 'wednesday'
-  | 'thursday'
-  | 'friday'
-  | 'saturday'
-  | 'sunday';
+export enum DayOfWeek {
+  Sunday    = 'sunday',
+  Monday    = 'monday',
+  Tuesday   = 'tuesday',
+  Wednesday = 'wednesday',
+  Thursday  = 'thursday',
+  Friday    = 'friday',
+  Saturday  = 'saturday',
+}
 
 /**
  * NOTE on `embedding`: pgvector's `vector` type has no native TypeORM ColumnType,

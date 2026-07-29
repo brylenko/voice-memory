@@ -1,16 +1,18 @@
 import type { Readable } from 'stream';
 
-export interface StreamingTranscriptionOptions {
-  language?: string;
-  /** 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' — tradeoff between latency and accuracy */
-  latency?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export enum TranscriptionLatency {
+  Minimal = 'minimal',
+  Low     = 'low',
+  Medium  = 'medium',
+  High    = 'high',
+  XHigh   = 'xhigh',
 }
 
-/**
- * Outbound port: real-time streaming transcription.
- * Takes a PCM audio stream, yields transcript text deltas as they arrive.
- * Swap adapter: OpenAI Realtime → self-hosted Whisper streaming → any other provider.
- */
+export interface StreamingTranscriptionOptions {
+  language?: string;
+  latency?: TranscriptionLatency;
+}
+
 export interface StreamingTranscriptionPort {
   transcribeStream(
     audioStream: Readable,

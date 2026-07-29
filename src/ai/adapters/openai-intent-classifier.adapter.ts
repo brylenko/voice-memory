@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CHAT_COMPLETION_PORT, ChatCompletionPort } from '../ports/chat-completion.port';
-import type { AudioIntent, IntentClassifierPort, RecordingType } from '../ports/intent-classifier.port';
+import { AudioIntent, IntentClassifierPort, RecordingType } from '../ports/intent-classifier.port';
 
 const SYSTEM_PROMPT = `You classify voice messages into exactly one of these categories:
 
@@ -31,7 +31,17 @@ Respond with ONLY JSON in one of these shapes:
   {"intent": "custom"}
 No other text.`;
 
-const RECORDING_TYPES = new Set<RecordingType>(['meeting', 'interview', 'lecture', 'sales_call', 'custom']);
+type IntentPayload = { intent: string; taskHint?: string };
+
+type IntentFactory = (payload: IntentPayload) => AudioIntent;
+
+const INTENT_MAP: Record<string, IntentFactory> = {
+  search_query:   () => ({ kind: 'search_query' }),
+  list_tasks:     () => ({ kind: 'list_tasks' }),
+  mark_task_done: (p) => ({ kind: 'mark_task_done', taskHint: p.taskHint ?? '' }),
+};
+
+const RECORDING_TYPES = new Set<string>(Object.values(RecordingType));
 
 @Injectable()
 export class OpenAiIntentClassifierAdapter implements IntentClassifierPort {
@@ -51,34 +61,25 @@ export class OpenAiIntentClassifierAdapter implements IntentClassifierPort {
     );
 
     try {
-      const parsed = JSON.parse(raw || '{}') as { intent?: string };
-      const intent = parsed.intent ?? 'meeting';
+      const payload = JSON.parse(raw || '{}') as IntentPayload;
+      const intent = payload.intent ?? RecordingType.Meeting;
 
-      if (intent === 'search_query') {
-        this.logger.log(`← intent=search_query`);
-        return { kind: 'search_query' };
+      const factory = INTENT_MAP[intent];
+      if (factory) {
+        const result = factory(payload);
+        this.logger.log(`← intent=${intent}${payload.taskHint ? ` taskHint="${payload.taskHint}"` : ''}`);
+        return result;
       }
 
-      if (intent === 'list_tasks') {
-        this.logger.log(`← intent=list_tasks`);
-        return { kind: 'list_tasks' };
-      }
-
-      if (intent === 'mark_task_done') {
-        const taskHint = (parsed as { taskHint?: string }).taskHint ?? '';
-        this.logger.log(`← intent=mark_task_done taskHint="${taskHint}"`);
-        return { kind: 'mark_task_done', taskHint };
-      }
-
-      const recordingType: RecordingType = RECORDING_TYPES.has(intent as RecordingType)
+      const recordingType: RecordingType = RECORDING_TYPES.has(intent)
         ? (intent as RecordingType)
-        : 'meeting';
+        : RecordingType.Meeting;
 
       this.logger.log(`← intent=recording recordingType=${recordingType}`);
       return { kind: 'recording', recordingType };
     } catch {
       this.logger.warn(`Failed to parse intent response, defaulting to meeting: ${raw}`);
-      return { kind: 'recording', recordingType: 'meeting' };
+      return { kind: 'recording', recordingType: RecordingType.Meeting };
     }
   }
 }

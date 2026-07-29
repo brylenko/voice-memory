@@ -13,9 +13,10 @@ import { EMBEDDING_PORT, EmbeddingPort } from '../ai/ports/embedding.port';
 import { SUMMARIZATION_PORT, SummarizationPort } from '../ai/ports/summarization.port';
 import { BALANCE_CHECKER_PORT, BalanceCheckerPort } from '../billing/ports/balance-checker.port';
 import { TelegramApiClient } from '../audio-ingest/adapters/inbound/telegram/telegram-api.client';
-import type { SummaryTemplate } from '../ai/ports/summarization.port';
+import { SummaryTemplate } from '../ai/ports/summarization.port';
 import type { AudioProcessingJob } from './audio-processing-job.interface';
 import { TAGGING_PORT, TaggingPort } from '../ai/ports/tagging.port';
+import { UserEntity } from '../user/user.entity';
 
 @Processor('audio-processing')
 export class AudioProcessorProcessor {
@@ -24,6 +25,8 @@ export class AudioProcessorProcessor {
   constructor(
     @InjectRepository(AudioTrackEntity)
     private readonly trackRepo: Repository<AudioTrackEntity>,
+    @InjectRepository(UserEntity)
+    private readonly userRepo: Repository<UserEntity>,
     private readonly chunkRepo: AudioChunkRepository,
     private readonly notifications: NotificationService,
     @InjectQueue('audio-processing') private readonly queue: Queue,
@@ -67,9 +70,11 @@ export class AudioProcessorProcessor {
 
       // --- Step C: chunk + embed for RAG (parallel with summarization) ---
       // --- Step D: summarize with auto-detected template ---
-      const VALID_TEMPLATES = new Set<SummaryTemplate>(['meeting', 'interview', 'lecture', 'sales_call', 'custom']);
-      const detected = job.data.detectedTemplate as SummaryTemplate | undefined;
-      const template: SummaryTemplate = detected && VALID_TEMPLATES.has(detected) ? detected : 'meeting';
+      const VALID_TEMPLATES = new Set<string>(Object.values(SummaryTemplate));
+      const detected = job.data.detectedTemplate;
+      const template: SummaryTemplate = detected && VALID_TEMPLATES.has(detected)
+        ? (detected as SummaryTemplate)
+        : SummaryTemplate.Meeting;
       this.logger.log(`[${trackId}] C+D+E: embedding, summarizing, tagging in parallel (template=${template})`);
       const t2 = Date.now();
       const [summaries, tags] = await Promise.all([
@@ -90,6 +95,8 @@ export class AudioProcessorProcessor {
         [JSON.stringify(summaries), tags, fullText, AudioTrackStatus.COMPLETED, trackId],
       );
       this.logger.log(`[${trackId}] F: saved summaries + tags + full-text index, status=COMPLETED`);
+
+      await this.userRepo.increment({ id: track.userId }, 'freeTracksUsed', 1);
 
       const consumedMinutes = Math.ceil(track.duration / 60);
       await this.balance.consumeMinutes(track.userId, consumedMinutes);

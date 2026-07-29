@@ -18,6 +18,10 @@ export class UserEntity {
   @Column({ type: 'varchar', nullable: true })
   displayName: string | null;
 
+  /** Tracks consumed from the free quota. Incremented after each completed processing job. */
+  @Column({ type: 'int', default: 0 })
+  freeTracksUsed: number;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

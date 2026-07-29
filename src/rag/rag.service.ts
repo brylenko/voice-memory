@@ -16,10 +16,10 @@ export interface AskResult {
 }
 
 const ANSWER_SYSTEM_PROMPT =
-  'Ты — ассистент, отвечающий на вопросы по расшифровкам встреч пользователя. ' +
-  'Отвечай ТОЛЬКО на основе предоставленного контекста. Если контекста недостаточно, ' +
-  'честно скажи, что информации не нашлось. Обязательно указывай дату и время встреч, ' +
-  'из которых взята информация.';
+  'You are an assistant that answers questions based on the user\'s meeting transcripts. ' +
+  'Answer ONLY from the provided context. If there is not enough context, honestly say that the information was not found. ' +
+  'Always mention the date and time of the meetings the information was taken from. ' +
+  'Reply in the same language the user used in their question.';
 
 /**
  * Hybrid RAG: a calendar/date filter (cheap, exact) narrows the search space before
@@ -74,12 +74,12 @@ export class RagService {
       `Today is ${today}. Extract the date range and the core question from the user's query.\n` +
       `Rules:\n` +
       `- "today" / "сьогодні" / "сегодня" → startDate = endDate = ${today}\n` +
-      `- "yesterday" / "вчора" / "вчера" → startDate = endDate = yesterday\n` +
+      `- "yesterday" / "вчора" / "вчера" / "昨日" → startDate = endDate = yesterday\n` +
       `- "this week" / "цього тижня" / "на этой неделе" → startDate = Monday of current week, endDate = ${today}\n` +
       `- "last week" / "минулого тижня" / "на прошлой неделе" → startDate = Monday of previous week, endDate = Sunday of previous week\n` +
       `- "this month" / "цього місяця" / "в этом месяце" → startDate = first day of current month, endDate = ${today}\n` +
       `- "last month" / "минулого місяця" / "в прошлом месяце" → full previous calendar month\n` +
-      `- "last N days/weeks/months" / "за останні N ..." → calculate accordingly from ${today}\n` +
+      `- "last N days/weeks/months" / "за останні N ..." / "за последние N ..." → calculate accordingly from ${today}\n` +
       `- specific month/year mentioned → that full calendar month\n` +
       `- no date mentioned at all → startDate = ${farPast}, endDate = ${today}\n` +
       `Return ONLY valid JSON (no markdown): { "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "cleanQuery": "<question without date references, in original language>" }`;
@@ -113,14 +113,14 @@ export class RagService {
         const d = new Date(c.createdAt);
         const date = d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' })
           + ' ' + d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
-        return `[Фрагмент ${i + 1} | зустріч від ${date}]\n${c.text}`;
+        return `[Fragment ${i + 1} | meeting ${date}]\n${c.text}`;
       })
       .join('\n\n');
 
     return this.chat.complete(
       [
         { role: 'system', content: ANSWER_SYSTEM_PROMPT },
-        { role: 'user', content: `Контекст встреч:\n${context}\n\nВопрос: ${cleanQuery}` },
+        { role: 'user', content: `Meeting context:\n${context}\n\nQuestion: ${cleanQuery}` },
       ],
       { temperature: 0.2 },
     );

@@ -2,7 +2,7 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { TrackSummaries, ActionTask } from '../../audio-track/audio-track.entity';
 import { SummarySection, SUMMARY_SECTIONS } from '../../audio-track/audio-track.entity';
-import type { SummarizationPort, SummaryTemplate } from '../ports/summarization.port';
+import { SummarizationPort, SummaryTemplate } from '../ports/summarization.port';
 import { CHAT_COMPLETION_PORT, ChatCompletionPort } from '../ports/chat-completion.port';
 
 const LANG =
@@ -78,7 +78,7 @@ export class OpenAiSummarizationAdapter implements SummarizationPort {
 
   constructor(@Inject(CHAT_COMPLETION_PORT) private readonly chat: ChatCompletionPort) {}
 
-  async summarize(fullText: string, template: SummaryTemplate = 'meeting'): Promise<TrackSummaries> {
+  async summarize(fullText: string, template: SummaryTemplate = SummaryTemplate.Meeting): Promise<TrackSummaries> {
     const prompts = TEMPLATES[template];
     this.logger.log(
       `→ summarize: template=${template} running ${SUMMARY_SECTIONS.length + 1} prompts in parallel (text=${fullText.length} chars)`,

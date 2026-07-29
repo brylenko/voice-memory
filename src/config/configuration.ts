@@ -29,6 +29,11 @@ export default () => ({
   // no files piling up on the app server's disk).
   storageDriver: process.env.STORAGE_DRIVER ?? 'local',
   billingDriver: process.env.BILLING_DRIVER ?? 'mock',
+  payment: {
+    required: process.env.PAYMENT_REQUIRED === 'true',
+    url: process.env.PAYMENT_URL ?? '',
+    freeTracksLimit: parseInt(process.env.FREE_TRACKS_LIMIT ?? '10', 10),
+  },
   s3: {
     region: process.env.AWS_REGION ?? 'eu-central-1',
     bucket: process.env.S3_BUCKET_NAME ?? '',

@@ -284,6 +284,93 @@ curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
    channel the recording came from (both end up as a normal `AudioTrackEntity`
    with `channel: 'telegram'`).
 
+## Smart glasses integration
+
+The backend is ready to accept audio from smart glasses out of the box — no backend changes required. Glasses are just another inbound channel on top of the existing WebSocket streaming endpoint.
+
+### Protocol
+
+```
+WebSocket: ws(s)://your-server/audio/live?userId=<uuid>&lang=en
+
+Client → Server:
+  binary frames   — PCM16 mono 24 kHz, ~100 ms chunks
+  text "end"      — signals end of recording
+
+Server → Client:
+  {"type":"transcript","text":"..."}               — live word-by-word delta
+  {"type":"done","fullText":"...","trackId":"..."}  — final transcript + track id
+  {"type":"error","message":"..."}                  — something went wrong
+```
+
+After `done`, the track is fully indexed: tags extracted, embeddings stored in pgvector, full-text search vector updated — immediately queryable via voice search.
+
+### Example: Frame by Brilliant Labs (TypeScript/Node companion app)
+
+Frame glasses connect to a companion app on the user's phone over Bluetooth. The companion app streams mic audio to our backend over WebSocket:
+
+```typescript
+import WebSocket from 'ws';
+
+// Called by the Frame Bluetooth SDK when audio chunk arrives
+export async function streamToBackend(userId: string) {
+  const ws = new WebSocket(`wss://your-server/audio/live?userId=${userId}&lang=en`);
+
+  await new Promise<void>(resolve => ws.on('open', resolve));
+
+  // Wire Frame mic → WebSocket
+  frame.microphone.on('data', (pcm16Chunk: Buffer) => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(pcm16Chunk);
+  });
+
+  // Show live transcript on Frame display
+  ws.on('message', (raw) => {
+    const event = JSON.parse(raw.toString());
+    if (event.type === 'transcript') frame.display.showText(event.text);
+    if (event.type === 'done')       frame.display.showText('✓ Saved');
+  });
+
+  // Stop recording → send EOF
+  frame.microphone.on('stop', () => ws.send('end'));
+}
+```
+
+### Example: Meta Ray-Ban (via Meta Orion SDK)
+
+Meta glasses expose a media stream via the Orion SDK. Pipe it to our endpoint:
+
+```typescript
+import WebSocket from 'ws';
+import { OrionSession } from '@meta/orion-sdk';
+
+export async function streamToBackend(userId: string) {
+  const session = await OrionSession.create();
+  const ws = new WebSocket(`wss://your-server/audio/live?userId=${userId}&lang=en`);
+
+  await new Promise<void>(resolve => ws.on('open', resolve));
+
+  session.audio.on('chunk', (pcm: Buffer) => ws.send(pcm));
+  session.audio.on('end',   ()           => ws.send('end'));
+
+  ws.on('message', (raw) => {
+    const event = JSON.parse(raw.toString());
+    if (event.type === 'transcript') session.display.setText(event.text);
+    if (event.type === 'done')       session.display.setText('✓ Saved to memory');
+  });
+}
+```
+
+### Audio requirements
+
+| Parameter | Value |
+|---|---|
+| Format | PCM 16-bit signed little-endian |
+| Sample rate | 24 000 Hz |
+| Channels | Mono |
+| Chunk size | ~100 ms (~4 800 samples per chunk) |
+
+Any glasses that can output PCM audio over Bluetooth or WiFi can integrate with this backend using the same pattern.
+
 ## Live transcription test page
 
 Available in development (`ENV=development`) at `GET /public/stream-test.html`.
@@ -324,6 +411,15 @@ Not served in production — the static middleware is only mounted when `ENV=dev
   `wallets`/`subscriptions` table and a payment-provider webhook (Stripe etc.)
   for top-ups. The consume logic in `AudioProcessorProcessor` is already wired
   correctly — only the adapter needs replacing.
+- **Free-quota gate** — every user has a `freeTracksUsed` counter (DB column).
+  After each successfully processed recording it is incremented automatically
+  (both the HTTP upload path and the WebSocket live path). Set
+  `PAYMENT_REQUIRED=true` + `PAYMENT_URL=https://…` + `FREE_TRACKS_LIMIT=10`
+  (default 10) to block connections once the free quota is exhausted: the
+  WebSocket handshake will complete but on the first audio frame the gateway
+  sends `{"type":"error","message":"Free quota exceeded…","paymentUrl":"…"}`
+  and closes the connection. With `PAYMENT_REQUIRED=false` (default) the counter
+  still increments — flip the flag any time without a deploy to enable the gate.
 
 ### 🟡 Should fix before/soon after launch
 

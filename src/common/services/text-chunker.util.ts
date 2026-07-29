@@ -1,7 +1,5 @@
-/**
- * Splits a transcript into semantically coherent chunks of ~targetSize characters,
- * always breaking on sentence boundaries so embeddings stay meaningful.
- */
+import { DayOfWeek } from '../../audio-chunk/audio-chunk.entity';
+
 export function chunkTextBySentence(text: string, targetSize = 800): string[] {
   const sentences = text
     .replace(/\s+/g, ' ')
@@ -27,16 +25,16 @@ export function chunkTextBySentence(text: string, targetSize = 800): string[] {
   return chunks;
 }
 
-const DAY_NAMES = [
-  'sunday',
-  'monday',
-  'tuesday',
-  'wednesday',
-  'thursday',
-  'friday',
-  'saturday',
-] as const;
+const DAY_MAP: DayOfWeek[] = [
+  DayOfWeek.Sunday,
+  DayOfWeek.Monday,
+  DayOfWeek.Tuesday,
+  DayOfWeek.Wednesday,
+  DayOfWeek.Thursday,
+  DayOfWeek.Friday,
+  DayOfWeek.Saturday,
+];
 
-export function dayOfWeekOf(date: Date): (typeof DAY_NAMES)[number] {
-  return DAY_NAMES[date.getDay()];
+export function dayOfWeekOf(date: Date): DayOfWeek {
+  return DAY_MAP[date.getDay()];
 }

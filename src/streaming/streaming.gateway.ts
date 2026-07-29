@@ -1,4 +1,5 @@
 import { Inject, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -19,11 +20,12 @@ import { EMBEDDING_PORT, EmbeddingPort } from '../ai/ports/embedding.port';
 import { TAGGING_PORT, TaggingPort } from '../ai/ports/tagging.port';
 import { AudioTrackEntity, AudioTrackStatus } from '../audio-track/audio-track.entity';
 import { AudioChunkRepository } from '../audio-chunk/audio-chunk.repository';
+import { UserEntity } from '../user/user.entity';
 import { chunkTextBySentence, dayOfWeekOf } from '../common/services/text-chunker.util';
 
-interface TranscriptDelta { type: 'transcript'; text: string; }
-interface DoneEvent       { type: 'done'; fullText: string; trackId: string; }
-interface ErrorEvent      { type: 'error'; message: string; }
+interface TranscriptDelta   { type: 'transcript'; text: string; }
+interface DoneEvent         { type: 'done'; fullText: string; trackId: string; }
+interface ErrorEvent        { type: 'error'; message: string; paymentUrl?: string; }
 type ServerEvent = TranscriptDelta | DoneEvent | ErrorEvent;
 
 /**
@@ -59,15 +61,29 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
     private readonly tagging: TaggingPort,
     @InjectRepository(AudioTrackEntity)
     private readonly trackRepo: Repository<AudioTrackEntity>,
+    @InjectRepository(UserEntity)
+    private readonly userRepo: Repository<UserEntity>,
     private readonly chunkRepo: AudioChunkRepository,
+    private readonly config: ConfigService,
   ) {}
+
+  private async resolveUser(externalId: string): Promise<{ id: string; quotaExceeded: boolean }> {
+    let user = await this.userRepo.findOneBy({ deviceId: externalId });
+    if (!user) {
+      user = await this.userRepo.save(this.userRepo.create({ deviceId: externalId }));
+      this.logger.log(`Created new user for deviceId=${externalId}: ${user.id}`);
+    }
+    const limit = this.config.get<number>('payment.freeTracksLimit') ?? 10;
+    const quotaExceeded = limit > 0 && user.freeTracksUsed >= limit;
+    return { id: user.id, quotaExceeded };
+  }
 
   handleConnection(client: WebSocket, req: IncomingMessage) {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
-    const userId = url.searchParams.get('userId') ?? 'anonymous';
-    const lang   = url.searchParams.get('lang') ?? undefined;
+    const externalId = url.searchParams.get('userId') ?? 'anonymous';
+    const lang       = url.searchParams.get('lang') ?? undefined;
 
-    this.logger.log(`Client connected (userId=${userId})`);
+    this.logger.log(`Client connected (externalId=${externalId})`);
 
     const audioPassthrough = new Readable({ read() {} });
     this.sessions.set(client, audioPassthrough);
@@ -78,7 +94,18 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
       if (isBinary) {
         if (!audioStarted) {
           audioStarted = true;
-          void this.runSession(client, audioPassthrough, deltas, userId, lang);
+          void this.resolveUser(externalId).then(({ id: userId, quotaExceeded }) => {
+            if (quotaExceeded && this.config.get<boolean>('payment.required')) {
+              this.send(client, {
+                type: 'error',
+                message: 'Free quota exceeded. Please upgrade to continue.',
+                paymentUrl: this.config.get<string>('payment.url'),
+              });
+              client.close();
+              return;
+            }
+            void this.runSession(client, audioPassthrough, deltas, userId, lang);
+          });
         }
         audioPassthrough.push(data as Buffer);
         return;
@@ -196,6 +223,7 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
       );
     }
 
+    await this.userRepo.increment({ id: userId }, 'freeTracksUsed', 1);
     this.logger.log(`[${trackId}] finalized live transcript (${fullText.length} chars, ${textChunks.length} chunks, tags: ${tags.join(', ')})`);
     return trackId;
   }

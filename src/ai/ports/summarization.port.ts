@@ -1,13 +1,13 @@
 import type { TrackSummaries } from '../../audio-track/audio-track.entity';
 
-export type SummaryTemplate =
-  | 'meeting'
-  | 'interview'
-  | 'lecture'
-  | 'sales_call'
-  | 'custom';
+export enum SummaryTemplate {
+  Meeting   = 'meeting',
+  Interview = 'interview',
+  Lecture   = 'lecture',
+  SalesCall = 'sales_call',
+  Custom    = 'custom',
+}
 
-/** Outbound port: synchronous multi-dimensional summarization. */
 export interface SummarizationPort {
   summarize(fullText: string, template?: SummaryTemplate): Promise<TrackSummaries>;
 }
