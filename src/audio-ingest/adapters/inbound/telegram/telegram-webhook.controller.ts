@@ -14,6 +14,7 @@ import { INTENT_CLASSIFIER_PORT, IntentClassifierPort } from '../../../../ai/por
 import { RagService } from '../../../../rag/rag.service';
 import { UserEntity } from '../../../../user/user.entity';
 import { TasksService } from './tasks.service';
+import { CalendarCallbackService } from './calendar-callback.service';
 
 @Controller('telegram')
 export class TelegramWebhookController {
@@ -26,6 +27,7 @@ export class TelegramWebhookController {
     private readonly rag: RagService,
     private readonly telegram: TelegramApiClient,
     private readonly tasks: TasksService,
+    private readonly calendarCallback: CalendarCallbackService,
     @InjectRepository(UserEntity) private readonly userRepo: Repository<UserEntity>,
   ) {}
 
@@ -33,6 +35,27 @@ export class TelegramWebhookController {
   @UseGuards(TelegramWebhookGuard)
   @HttpCode(HttpStatus.OK)
   async handleUpdate(@Body() update: TelegramUpdate): Promise<{ ok: true }> {
+    // Handle inline keyboard button clicks
+    if (update.callback_query) {
+      const cq = update.callback_query;
+      const data = cq.data ?? '';
+      const chatId = cq.message?.chat.id ?? 0;
+      const messageId = cq.message?.message_id ?? 0;
+
+      if (data.startsWith('tag_noop:')) {
+        await this.telegram.answerCallbackQuery(cq.id);
+        return { ok: true };
+      }
+
+      if (data.startsWith('cal_')) {
+        await this.calendarCallback.handle(cq.id, data, chatId, messageId);
+        return { ok: true };
+      }
+
+      await this.telegram.answerCallbackQuery(cq.id);
+      return { ok: true };
+    }
+
     const message = update.message;
     const media = message?.voice ?? message?.audio;
 
@@ -71,10 +94,10 @@ export class TelegramWebhookController {
       }
     } catch (error) {
       if (error instanceof InsufficientBalanceError) {
-        await this.telegram.sendMessage(chatId, `Не хватає хвилин на балансі: ${error.message}`);
+        await this.telegram.sendMessage(chatId, `⚠️ Insufficient balance: ${error.message}`);
       } else {
         this.logger.error(`[tg=${telegramId}] failed to handle voice message`, error as Error);
-        await this.telegram.sendMessage(chatId, 'Не вдалося обробити запис, спробуй ще раз.');
+        await this.telegram.sendMessage(chatId, '❌ Failed to process the recording, please try again.');
       }
     }
 
@@ -93,19 +116,19 @@ export class TelegramWebhookController {
 
   private async handleSearchQuery(chatId: number, userId: string, query: string, replyToMessageId: number): Promise<void> {
     this.logger.log(`[user=${userId}] routing to RAG search: "${query}"`);
-    await this.telegram.sendMessage(chatId, `Шукаю в архіві: "${query}"`, undefined, replyToMessageId);
+    await this.telegram.sendMessage(chatId, `Searching archive: "${query}"`, undefined, replyToMessageId);
 
     const result = await this.rag.ask(userId, query);
 
     const uniqueDates = [...new Set(
       result.sourceChunks.map(c => {
         const d = new Date(c.createdAt);
-        return d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' })
-          + ' ' + d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
+          + ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
       }),
     )];
     const sourcesText = uniqueDates.length > 0
-      ? `\n\n📂 Джерела: ${uniqueDates.join(', ')}`
+      ? `\n\n📂 Sources: ${uniqueDates.join(', ')}`
       : '';
 
     await this.telegram.sendMessage(chatId, `💬 ${result.answer}${sourcesText}`);
@@ -114,20 +137,20 @@ export class TelegramWebhookController {
   private async handleListTasks(chatId: number, userId: string, replyToMessageId: number): Promise<void> {
     const openTasks = await this.tasks.getOpenTasks(userId);
     if (openTasks.length === 0) {
-      await this.telegram.sendMessage(chatId, '✅ Немає відкритих задач.', undefined, replyToMessageId);
+      await this.telegram.sendMessage(chatId, '✅ No open tasks.', undefined, replyToMessageId);
       return;
     }
     const lines = openTasks.map((t, i) => `${i + 1}. ${t.text}`).join('\n');
-    await this.telegram.sendMessage(chatId, `📋 Відкриті задачі:\n\n${lines}`, undefined, replyToMessageId);
+    await this.telegram.sendMessage(chatId, `📋 Open tasks:\n\n${lines}`, undefined, replyToMessageId);
   }
 
   private async handleMarkTaskDone(chatId: number, userId: string, taskHint: string, replyToMessageId: number): Promise<void> {
     const result = await this.tasks.markDone(userId, taskHint);
     if (!result) {
-      await this.telegram.sendMessage(chatId, `❓ Не знайшов задачу схожу на: "${taskHint}"`, undefined, replyToMessageId);
+      await this.telegram.sendMessage(chatId, `❓ Task not found matching: "${taskHint}"`, undefined, replyToMessageId);
       return;
     }
-    await this.telegram.sendMessage(chatId, `✅ Позначив як виконану:\n~~${result.text}~~`, undefined, replyToMessageId);
+    await this.telegram.sendMessage(chatId, `✅ Marked as done:\n~~${result.text}~~`, undefined, replyToMessageId);
   }
 
   private async handleRecording(
@@ -157,7 +180,7 @@ export class TelegramWebhookController {
 
     await this.telegram.sendMessage(
       chatId,
-      `Прийняв запис 🎙️ Обробляю (track ${result.trackId}). Надішлю конспект сюди, як буде готово.`,
+      `🎙️ Recording received (track ${result.trackId}). Processing — summary will be sent here when ready.`,
       undefined,
       messageId,
     );

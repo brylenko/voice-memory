@@ -14,13 +14,13 @@ export class UserProfiles1700000000002 implements MigrationInterface {
 
     await queryRunner.query(`
       INSERT INTO user_roles (name, label, default_template) VALUES
-        ('executive',  'Виконавець / Manager',  'meeting'),
-        ('sales',      'Продажі / Sales',        'sales_call'),
-        ('clinician',  'Лікар / Clinician',      'custom'),
-        ('lawyer',     'Юрист / Lawyer',          'custom'),
-        ('educator',   'Викладач / Educator',    'lecture'),
-        ('creator',    'Контент-мейкер',          'custom'),
-        ('other',      'Інше / Other',            'meeting')
+        ('executive',  'Manager / Executive',   'meeting'),
+        ('sales',      'Sales',                  'sales_call'),
+        ('clinician',  'Clinician',              'custom'),
+        ('lawyer',     'Lawyer',                 'custom'),
+        ('educator',   'Educator',               'lecture'),
+        ('creator',    'Content Creator',        'custom'),
+        ('other',      'Other',                  'meeting')
       ON CONFLICT (name) DO NOTHING
     `);
 

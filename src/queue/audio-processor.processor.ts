@@ -10,13 +10,12 @@ import { chunkTextBySentence, dayOfWeekOf } from '../common/services/text-chunke
 import { AUDIO_RETRIEVAL_PORT, AudioRetrievalPort } from './ports/audio-retrieval.port';
 import { TRANSCRIPTION_PORT, TranscriptionPort } from '../ai/ports/transcription.port';
 import { EMBEDDING_PORT, EmbeddingPort } from '../ai/ports/embedding.port';
-import { SUMMARIZATION_PORT, SummarizationPort } from '../ai/ports/summarization.port';
+import { SUMMARIZATION_PORT, SummarizationPort, SummaryTemplate } from '../ai/ports/summarization.port';
 import { BALANCE_CHECKER_PORT, BalanceCheckerPort } from '../billing/ports/balance-checker.port';
 import { TelegramApiClient } from '../audio-ingest/adapters/inbound/telegram/telegram-api.client';
-import { SummaryTemplate } from '../ai/ports/summarization.port';
 import type { AudioProcessingJob } from './audio-processing-job.interface';
-import { TAGGING_PORT, TaggingPort } from '../ai/ports/tagging.port';
 import { UserEntity } from '../user/user.entity';
+import { EncryptionService } from '../common/services/encryption.service';
 
 @Processor('audio-processing')
 export class AudioProcessorProcessor {
@@ -36,7 +35,7 @@ export class AudioProcessorProcessor {
     @Inject(SUMMARIZATION_PORT) private readonly summarization: SummarizationPort,
     @Inject(BALANCE_CHECKER_PORT) private readonly balance: BalanceCheckerPort,
     private readonly telegram: TelegramApiClient,
-    @Inject(TAGGING_PORT) private readonly tagging: TaggingPort,
+    private readonly encryption: EncryptionService,
   ) {}
 
   @Process({ name: 'process-audio-track', concurrency: 20 })
@@ -75,24 +74,28 @@ export class AudioProcessorProcessor {
       const template: SummaryTemplate = detected && VALID_TEMPLATES.has(detected)
         ? (detected as SummaryTemplate)
         : SummaryTemplate.Meeting;
-      this.logger.log(`[${trackId}] C+D+E: embedding, summarizing, tagging in parallel (template=${template})`);
+      this.logger.log(`[${trackId}] C+D: embedding + summarize (template=${template}) in parallel`);
       const t2 = Date.now();
-      const [summaries, tags] = await Promise.all([
-        this.summarization.summarize(fullText, template),
-        this.tagging.extractTags(fullText),
+      const track = await this.trackRepo.findOneByOrFail({ id: trackId });
+      const [result] = await Promise.all([
+        this.summarization.summarize(fullText, template, track.createdAt),
         this.embedAndStoreChunks(trackId, userId, fullText),
       ]);
-      this.logger.log(`[${trackId}] C+D+E: done in ${Date.now() - t2}ms — tags: ${tags.join(', ')}`);
+      const { summaries, tags, eventDate } = result;
+      this.logger.log(`[${trackId}] C+D: done in ${Date.now() - t2}ms — tags: ${tags.join(', ')} | eventDate: ${eventDate?.toISOString() ?? 'null'}`);
 
       // --- Step F: save results + full-text search vector ---
-      const track = await this.trackRepo.findOneByOrFail({ id: trackId });
+      const encryptedFullText = this.encryption.encrypt(fullText);
+      const encryptedSummaries = this.encryption.encryptJson(summaries);
       await this.trackRepo.manager.query(
         `UPDATE audio_tracks
          SET summaries = $1, tags = $2, "fullText" = $3,
-             "searchVector" = to_tsvector('simple', $3),
-             status = $4
-         WHERE id = $5`,
-        [JSON.stringify(summaries), tags, fullText, AudioTrackStatus.COMPLETED, trackId],
+             "searchVector" = to_tsvector('simple', $4),
+             "eventDate" = $5,
+             "tagsProcessed" = TRUE,
+             status = $6
+         WHERE id = $7`,
+        [encryptedSummaries, tags, encryptedFullText, fullText, eventDate, AudioTrackStatus.COMPLETED, trackId],
       );
       this.logger.log(`[${trackId}] F: saved summaries + tags + full-text index, status=COMPLETED`);
 
@@ -104,17 +107,26 @@ export class AudioProcessorProcessor {
 
       if (track.telegramChatId) {
         this.logger.log(`[${trackId}] F: sending results to telegram chat ${track.telegramChatId}`);
-        await this.telegram.sendMessage(
-          track.telegramChatId,
-          formatSummaries(summaries, tags, track),
-          'MarkdownV2',
-          track.telegramMessageId ?? undefined,
-        );
-        await this.telegram.sendMessage(
-          track.telegramChatId,
-          `📄 *Transcript*\n\n${mdv2Escape(fullText)}`,
-          'MarkdownV2',
-        );
+        const summaryText = formatSummaries(summaries, tags, track);
+        const calendarButtons = buildCalendarKeyboard(tags, trackId);
+        try {
+          if (calendarButtons.length > 0) {
+            await this.telegram.sendMessageWithKeyboard(track.telegramChatId, summaryText, calendarButtons, 'HTML');
+          } else {
+            await this.telegram.sendMessage(track.telegramChatId, summaryText, 'HTML', track.telegramMessageId ?? undefined);
+          }
+        } catch (sendErr) {
+          this.logger.error(`[${trackId}] HTML send failed (${(sendErr as Error).message}), retrying as plain text`);
+          await this.telegram.sendMessage(track.telegramChatId, formatSummariesPlain(summaries, tags, track));
+        }
+        try {
+          await this.telegram.sendMessage(
+            track.telegramChatId,
+            `📄 Transcript\n\n${fullText}`,
+          );
+        } catch (sendErr) {
+          this.logger.error(`[${trackId}] transcript send failed: ${(sendErr as Error).message}`);
+        }
       } else {
         await this.notifications.sendPushNotification(track.userId, trackId, 'Your meeting summary is ready');
       }
@@ -152,32 +164,63 @@ export class AudioProcessorProcessor {
   }
 }
 
-// Escape special MarkdownV2 characters outside of spoiler/bold blocks
-function mdv2Escape(text: string): string {
-  return text.replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, '\\$&');
+function htmlEscape(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+
+function formatSummariesPlain(s: TrackSummaries, tags: string[], track: AudioTrackEntity): string {
+  const date = track.createdAt.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const time = track.createdAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const tagsLine = tags.length > 0 ? `\n\n🏷 ${tags.map((t) => `#${t}`).join(' ')}` : '';
+  return [
+    `🎙 Recording ${date} at ${time}`,
+    `📋 Executive Summary\n${s.executive}`,
+    `✅ Action Items\n${s.actionItems}`,
+    `🔑 Key Decisions\n${s.keyDecisions}`,
+    `📝 Detailed Summary\n${s.detailed}${tagsLine}`,
+  ].join('\n\n─────────────────\n\n');
 }
 
 function formatSummaries(s: TrackSummaries, tags: string[], track: AudioTrackEntity): string {
-  const sep = mdv2Escape('─────────────────');
+  const sep = '─────────────────';
 
-  const date = track.createdAt.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const time = track.createdAt.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
+  const date = track.createdAt.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const time = track.createdAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   const durationMin = Math.floor(track.duration / 60);
   const durationSec = track.duration % 60;
-  const durationStr = durationMin > 0
-    ? `${durationMin} хв ${durationSec} с`
-    : `${durationSec} с`;
+  const durationStr = durationMin > 0 ? `${durationMin}m ${durationSec}s` : `${durationSec}s`;
 
+  const e = htmlEscape;
+  const tagsLine = tags.length > 0 ? `\n\n🏷 ${tags.map((t) => `#${e(t)}`).join(' ')}` : '';
   const parts = [
-    `🎙 *Запис від ${mdv2Escape(date)} о ${mdv2Escape(time)}* \\(${mdv2Escape(durationStr)}\\)`,
-    `📋 *Executive Summary*\n${mdv2Escape(s.executive)}`,
-    `✅ *Action Items*\n${mdv2Escape(s.actionItems)}`,
-    `🔑 *Key Decisions*\n${mdv2Escape(s.keyDecisions)}`,
-    `📝 *Detailed Summary*\n${mdv2Escape(s.detailed)}`,
+    `🎙 <b>Recording ${e(date)} at ${e(time)}</b> (${e(durationStr)})`,
+    `📋 <b>Executive Summary</b>\n${e(s.executive)}`,
+    `✅ <b>Action Items</b>\n${e(s.actionItems)}`,
+    `🔑 <b>Key Decisions</b>\n${e(s.keyDecisions)}`,
+    `📝 <b>Detailed Summary</b>\n${e(s.detailed)}${tagsLine}`,
   ];
-  if (tags.length > 0) {
-    const hashtags = tags.map((t) => mdv2Escape(`#${t.replace(/\s+/g, '_')}`)).join(' ');
-    parts.push(`🏷 *Tags*\n${hashtags}`);
-  }
   return parts.join(`\n\n${sep}\n\n`);
+}
+
+// Tags that imply a scheduled call/meeting — clicking them shows archive records of that type.
+// AI is instructed to always use English for calendar-type tags.
+const CALENDAR_TAG_PATTERNS = [
+  /^call$/i, /meeting/i, /interview/i, /sync/i, /zoom/i, /webinar/i, /conference/i, /lesson/i,
+];
+
+function isCalendarTag(tag: string): boolean {
+  return CALENDAR_TAG_PATTERNS.some((re) => re.test(tag));
+}
+
+// Returns inline keyboard rows for calendar-type tags only.
+// Each button: click → show archive records of that type from CalendarCallbackService.
+// cal_events:<trackId(36)> = 47 bytes — within Telegram's 64-byte limit ✓
+function buildCalendarKeyboard(
+  tags: string[],
+  trackId: string,
+): Array<Array<{ text: string; callback_data: string }>> {
+  return tags
+    .filter(isCalendarTag)
+    .map((tag) => [{ text: `📅 #${tag}`, callback_data: `cal_events:${trackId}` }]);
 }

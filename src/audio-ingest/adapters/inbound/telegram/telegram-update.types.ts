@@ -19,7 +19,15 @@ export interface TelegramMessage {
   audio?: TelegramAudio;
 }
 
+export interface TelegramCallbackQuery {
+  id: string;
+  from: { id: number; username?: string };
+  message?: { message_id: number; chat: { id: number } };
+  data?: string; // payload encoded as "action:param"
+}
+
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
 }

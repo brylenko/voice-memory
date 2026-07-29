@@ -73,13 +73,13 @@ export class RagService {
     const systemPrompt =
       `Today is ${today}. Extract the date range and the core question from the user's query.\n` +
       `Rules:\n` +
-      `- "today" / "сьогодні" / "сегодня" → startDate = endDate = ${today}\n` +
-      `- "yesterday" / "вчора" / "вчера" / "昨日" → startDate = endDate = yesterday\n` +
-      `- "this week" / "цього тижня" / "на этой неделе" → startDate = Monday of current week, endDate = ${today}\n` +
-      `- "last week" / "минулого тижня" / "на прошлой неделе" → startDate = Monday of previous week, endDate = Sunday of previous week\n` +
-      `- "this month" / "цього місяця" / "в этом месяце" → startDate = first day of current month, endDate = ${today}\n` +
-      `- "last month" / "минулого місяця" / "в прошлом месяце" → full previous calendar month\n` +
-      `- "last N days/weeks/months" / "за останні N ..." / "за последние N ..." → calculate accordingly from ${today}\n` +
+      `- "today" → startDate = endDate = ${today}\n` +
+      `- "yesterday" → startDate = endDate = yesterday\n` +
+      `- "this week" → startDate = Monday of current week, endDate = ${today}\n` +
+      `- "last week" → startDate = Monday of previous week, endDate = Sunday of previous week\n` +
+      `- "this month" → startDate = first day of current month, endDate = ${today}\n` +
+      `- "last month" → full previous calendar month\n` +
+      `- "last N days/weeks/months" → calculate accordingly from ${today}\n` +
       `- specific month/year mentioned → that full calendar month\n` +
       `- no date mentioned at all → startDate = ${farPast}, endDate = ${today}\n` +
       `Return ONLY valid JSON (no markdown): { "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "cleanQuery": "<question without date references, in original language>" }`;
@@ -111,8 +111,8 @@ export class RagService {
     const context = chunks
       .map((c, i) => {
         const d = new Date(c.createdAt);
-        const date = d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', year: 'numeric' })
-          + ' ' + d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
+        const date = d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
+          + ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
         return `[Fragment ${i + 1} | meeting ${date}]\n${c.text}`;
       })
       .join('\n\n');

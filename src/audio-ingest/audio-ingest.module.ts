@@ -34,6 +34,8 @@ import { TelegramWebhookController } from './adapters/inbound/telegram/telegram-
 import { TelegramWebhookGuard } from './adapters/inbound/telegram/telegram-webhook.guard';
 import { TelegramApiClient } from './adapters/inbound/telegram/telegram-api.client';
 import { TasksService } from './adapters/inbound/telegram/tasks.service';
+import { CalendarCallbackService } from './adapters/inbound/telegram/calendar-callback.service';
+import { GoogleModule } from '../google/google.module';
 
 /**
  * Composition root for the "ingest a recording" hexagon.
@@ -54,6 +56,7 @@ import { TasksService } from './adapters/inbound/telegram/tasks.service';
     BullModule.registerQueue({ name: 'audio-processing' }),
     BillingModule,
     RagModule,
+    GoogleModule,
   ],
   controllers: [UploadController, LocalUploadController, TelegramWebhookController],
   providers: [
@@ -62,6 +65,7 @@ import { TasksService } from './adapters/inbound/telegram/tasks.service';
     TelegramWebhookGuard,
     TelegramApiClient,
     TasksService,
+    CalendarCallbackService,
 
     // application core
     { provide: INGEST_AUDIO_USE_CASE, useClass: IngestAudioService },

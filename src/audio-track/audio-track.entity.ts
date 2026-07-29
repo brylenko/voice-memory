@@ -79,8 +79,8 @@ export class AudioTrackEntity {
   @Column()
   fileUrl: string;
 
-  /** Multi-dimensional summaries produced by the Batch API step (JSONB). */
-  @Column({ type: 'jsonb', nullable: true })
+  /** Encrypted JSON of TrackSummaries (stored as text after migration 012). */
+  @Column({ type: 'text', nullable: true })
   summaries: TrackSummaries | null;
 
   /** OpenAI batch job id, kept so the polling worker can resume after a restart. */
@@ -90,6 +90,22 @@ export class AudioTrackEntity {
   /** Auto-detected tags extracted by LLM from the transcript. */
   @Column({ type: 'text', array: true, default: [] })
   tags: string[];
+
+  /** Set to true after tags/eventDate have been extracted — prevents re-processing by BackfillTasksCron. */
+  @Column({ type: 'boolean', default: false })
+  tagsProcessed: boolean;
+
+  /** Date/time of the meeting or call mentioned in the transcript (LLM-extracted, may be future). */
+  @Column({ type: 'timestamptz', nullable: true })
+  eventDate: Date | null;
+
+  /** Google Calendar event ID this recording is linked to. */
+  @Column({ type: 'varchar', nullable: true })
+  calendarEventId: string | null;
+
+  /** Human-readable title of the linked calendar event (cached to avoid re-fetch). */
+  @Column({ type: 'varchar', nullable: true })
+  calendarEventTitle: string | null;
 
   /** Full transcript text — stored for full-text search. */
   @Column({ type: 'text', nullable: true })

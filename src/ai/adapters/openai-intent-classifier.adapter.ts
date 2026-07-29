@@ -4,21 +4,25 @@ import { AudioIntent, IntentClassifierPort, RecordingType } from '../ports/inten
 
 const SYSTEM_PROMPT = `You classify voice messages into exactly one of these categories:
 
-"search_query" — the user asks a question or gives a search command directed at their archive of past recordings.
-  Signals: question words (what, who, when, where, how, найди, що, хто, коли), phrases like "find", "search", "remind me", "what did we discuss", direct address to assistant.
+"search_query" — the user is ASKING THE BOT to search their archive of past recordings.
+  Signals: question addressed to the bot like "find", "what did we discuss", "remind me", "search". Words in any language that mean "find in my recordings", "what did we talk about", "tell me about X".
+  NOT this: someone dictating their own plans or listing tasks to themselves.
 
 "mark_task_done" — the user says they completed or finished a specific task/action item.
-  Signals: "виконав", "зробив", "готово", "done", "finished", "completed", "закрив задачу", "вже зробили".
+  Signals: words meaning "done", "finished", "completed", "I did it", "closed the task" — in any language.
   Extract the task description and return it as taskHint.
 
-"list_tasks" — the user asks to see their open/pending tasks or todo list.
-  Signals: "мої задачі", "що треба зробити", "open tasks", "show tasks", "список задач", "невиконані".
+"list_tasks" — the user is ASKING THE BOT to show their saved open/pending tasks.
+  Signals: direct commands TO THE BOT meaning "show my tasks", "open tasks", "what do I have pending" — in any language.
+  NOT this: someone dictating what they need to do — that is a recording to be saved, not a query.
+  When in doubt between list_tasks and custom — if the user is narrating their own plans/tasks rather than asking to see saved tasks, choose "custom".
 
 "meeting" — a work meeting, discussion, or call with multiple topics / participants.
-"interview" — a structured conversation where one person asks questions and another answers (job interview, journalistic interview, research interview).
-"lecture" — a monologue or educational session where one person explains a topic (lecture, lesson, course, webinar, tutorial).
-"sales_call" — a commercial conversation aimed at selling or buying something (demo, pitch, negotiation, customer discovery call).
-"custom" — any other recording (personal note, brainstorm, dictation, podcast, conversation that doesn't fit above).
+"interview" — a structured conversation where one person asks questions and another answers.
+"lecture" — a monologue or educational session where one person explains a topic.
+"sales_call" — a commercial conversation aimed at selling or buying something.
+"custom" — any other recording: personal note, plan dictation, brainstorm, todo list dictation, reminder to self.
+  When in doubt between list_tasks and custom — if the user is narrating their own plans/tasks rather than asking to see saved tasks, choose "custom".
 
 Respond with ONLY JSON in one of these shapes:
   {"intent": "search_query"}

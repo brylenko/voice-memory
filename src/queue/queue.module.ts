@@ -8,6 +8,7 @@ import { UserEntity } from '../user/user.entity';
 import { AudioChunkRepository } from '../audio-chunk/audio-chunk.repository';
 import { AudioProcessorProcessor } from './audio-processor.processor';
 import { BackfillTasksCron } from './backfill-tasks.cron';
+import { DailyBriefingCron } from './daily-briefing.cron';
 import { NotificationModule } from '../notification/notification.module';
 import { CommonModule } from '../common/common.module';
 import { AiModule } from '../ai/ai.module';
@@ -15,6 +16,7 @@ import { BillingModule } from '../billing/billing.module';
 import { AUDIO_RETRIEVAL_PORT } from './ports/audio-retrieval.port';
 import { LocalDiskRetrievalAdapter } from './adapters/local-disk-retrieval.adapter';
 import { S3RetrievalAdapter } from './adapters/s3-retrieval.adapter';
+import { TelegramApiClient } from '../audio-ingest/adapters/inbound/telegram/telegram-api.client';
 
 @Module({
   imports: [
@@ -28,7 +30,9 @@ import { S3RetrievalAdapter } from './adapters/s3-retrieval.adapter';
   providers: [
     AudioProcessorProcessor,
     BackfillTasksCron,
+    DailyBriefingCron,
     AudioChunkRepository,
+    TelegramApiClient,
     LocalDiskRetrievalAdapter,
     S3RetrievalAdapter,
     {

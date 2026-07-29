@@ -17,11 +17,12 @@ import {
   StreamingTranscriptionPort,
 } from '../ai/ports/streaming-transcription.port';
 import { EMBEDDING_PORT, EmbeddingPort } from '../ai/ports/embedding.port';
-import { TAGGING_PORT, TaggingPort } from '../ai/ports/tagging.port';
+import { SUMMARIZATION_PORT, SummarizationPort, SummaryTemplate } from '../ai/ports/summarization.port';
 import { AudioTrackEntity, AudioTrackStatus } from '../audio-track/audio-track.entity';
 import { AudioChunkRepository } from '../audio-chunk/audio-chunk.repository';
 import { UserEntity } from '../user/user.entity';
 import { chunkTextBySentence, dayOfWeekOf } from '../common/services/text-chunker.util';
+import { EncryptionService } from '../common/services/encryption.service';
 
 interface TranscriptDelta   { type: 'transcript'; text: string; }
 interface DoneEvent         { type: 'done'; fullText: string; trackId: string; }
@@ -57,14 +58,15 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
     private readonly streaming: StreamingTranscriptionPort,
     @Inject(EMBEDDING_PORT)
     private readonly embedding: EmbeddingPort,
-    @Inject(TAGGING_PORT)
-    private readonly tagging: TaggingPort,
+    @Inject(SUMMARIZATION_PORT)
+    private readonly summarization: SummarizationPort,
     @InjectRepository(AudioTrackEntity)
     private readonly trackRepo: Repository<AudioTrackEntity>,
     @InjectRepository(UserEntity)
     private readonly userRepo: Repository<UserEntity>,
     private readonly chunkRepo: AudioChunkRepository,
     private readonly config: ConfigService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   private async resolveUser(externalId: string): Promise<{ id: string; quotaExceeded: boolean }> {
@@ -196,16 +198,18 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
   private async finalize(trackId: string, userId: string, fullText: string): Promise<string> {
     if (!fullText.trim()) return trackId;
 
-    const [tags, textChunks] = await Promise.all([
-      this.tagging.extractTags(fullText),
+    const track = await this.trackRepo.findOneByOrFail({ id: trackId });
+    const [summarizeResult, textChunks] = await Promise.all([
+      this.summarization.summarize(fullText, SummaryTemplate.Custom, track.createdAt),
       Promise.resolve(chunkTextBySentence(fullText, 800)),
     ]);
+    const { tags, eventDate } = summarizeResult;
 
     await this.trackRepo.manager.query(
       `UPDATE audio_tracks
-       SET "fullText" = $1, "searchVector" = to_tsvector('simple', $1), tags = $2, status = $3
-       WHERE id = $4`,
-      [fullText, tags, AudioTrackStatus.COMPLETED, trackId],
+       SET "fullText" = $1, "searchVector" = to_tsvector('simple', $2), tags = $3, "eventDate" = $4, "tagsProcessed" = TRUE, status = $5
+       WHERE id = $6`,
+      [this.encryption.encrypt(fullText), fullText, tags, eventDate, AudioTrackStatus.COMPLETED, trackId],
     );
 
     if (textChunks.length > 0) {
@@ -224,7 +228,7 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
     }
 
     await this.userRepo.increment({ id: userId }, 'freeTracksUsed', 1);
-    this.logger.log(`[${trackId}] finalized live transcript (${fullText.length} chars, ${textChunks.length} chunks, tags: ${tags.join(', ')})`);
+    this.logger.log(`[${trackId}] finalized live transcript (${fullText.length} chars, ${textChunks.length} chunks, tags: ${tags.join(', ')}, eventDate: ${eventDate?.toISOString() ?? 'null'})`);
     return trackId;
   }
 

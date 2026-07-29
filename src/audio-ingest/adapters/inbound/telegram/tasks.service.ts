@@ -1,10 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AudioTrackEntity, AudioTrackStatus } from '../../../../audio-track/audio-track.entity';
 import type { ActionTask } from '../../../../audio-track/audio-track.entity';
-import { Inject } from '@nestjs/common';
 import { CHAT_COMPLETION_PORT, ChatCompletionPort } from '../../../../ai/ports/chat-completion.port';
+import { EncryptionService } from '../../../../common/services/encryption.service';
 
 @Injectable()
 export class TasksService {
@@ -14,6 +14,7 @@ export class TasksService {
     @InjectRepository(AudioTrackEntity)
     private readonly trackRepo: Repository<AudioTrackEntity>,
     @Inject(CHAT_COMPLETION_PORT) private readonly chat: ChatCompletionPort,
+    private readonly encryption: EncryptionService,
   ) {}
 
   async getOpenTasks(userId: string): Promise<ActionTask[]> {
@@ -26,6 +27,7 @@ export class TasksService {
       .orderBy('t.createdAt', 'DESC')
       .getMany();
 
+    tracks.forEach((t) => this.encryption.decryptTrack(t));
     return tracks.flatMap((t) => (t.summaries?.tasks ?? []).filter((task) => !task.done));
   }
 
@@ -39,6 +41,8 @@ export class TasksService {
       .select(['t.id', 't.summaries'])
       .orderBy('t.createdAt', 'DESC')
       .getMany();
+
+    tracks.forEach((t) => this.encryption.decryptTrack(t));
 
     const openTasks: Array<{ trackId: string; task: ActionTask; index: number }> = [];
     for (const track of tracks) {
@@ -59,7 +63,7 @@ export class TasksService {
     updatedTasks[index] = { ...task, done: true };
 
     await this.trackRepo.update(trackId, {
-      summaries: { ...track.summaries!, tasks: updatedTasks },
+      summaries: this.encryption.encryptJson({ ...track.summaries!, tasks: updatedTasks }) as any,
     });
 
     this.logger.log(`markDone: task "${task.text}" on track ${trackId}`);

@@ -1,75 +1,51 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { TrackSummaries, ActionTask } from '../../audio-track/audio-track.entity';
-import { SummarySection, SUMMARY_SECTIONS } from '../../audio-track/audio-track.entity';
-import { SummarizationPort, SummaryTemplate } from '../ports/summarization.port';
+import { SummarizationPort, SummaryTemplate, SummarizationResult } from '../ports/summarization.port';
 import { CHAT_COMPLETION_PORT, ChatCompletionPort } from '../ports/chat-completion.port';
 
-const LANG =
-  'Detect the language of the transcript and write your entire response in that exact language.';
-
 const NO_INVENT =
-  'Use ONLY information from the transcript — do NOT invent dates, names, or placeholders like [указать] or [TBD]. If something is not mentioned, simply omit it.';
+  'Use ONLY information from the transcript — do NOT invent dates, names, or placeholders like [TBD]. If something is not mentioned, simply omit it or leave the field empty.';
 
-const TASKS_PROMPT =
-  `Extract all action items / tasks from the transcript as a JSON array.
-Each element: { "text": "<task description in the transcript language>" }.
-Return ONLY the JSON array, no other text. If no tasks found, return [].
+const SYSTEM_PROMPT = (template: SummaryTemplate, recordingDate: string) => `You analyze a voice recording transcript and return a single JSON object with ALL fields populated.
+
+Recording date (for resolving relative dates): ${recordingDate}
+Recording type: ${template}
+
+Return ONLY this JSON structure, no markdown, no explanation:
+{
+  "executive": "<3-5 sentence summary of the main outcome — coherent prose, no bullet points>",
+  "actionItems": "<bullet list of all action items with owner and deadline if mentioned; 'No action items.' if none>",
+  "keyDecisions": "<bullet list of key decisions/agreements made; 'No decisions.' if none>",
+  "detailed": "<detailed structured notes in chronological order — preserve names, numbers, dates>",
+  "tasks": [{"text": "<concrete task in transcript language>"}],
+  "tags": ["<important entity>"],
+  "eventDate": "<ISO 8601 datetime or null>"
+}
+
+Field rules:
+- executive / actionItems / keyDecisions / detailed: write in the transcript's language. ${NO_INVENT}
+- tasks: every concrete action the speaker needs to do — include conditional ones too (e.g. "call at 15:00 if not delivered"). Return [] only if truly no actions.
+- tags: use NOUNS or noun phrases, never verbs/actions.
+    RULE: tags for call/meeting/event types MUST be in English (call, meeting, zoom, interview, etc.) — they are used as identifiers.
+    All other tags (people, projects, objects) write in the transcript's language.
+    INCLUDE: event types in English ("call", "meeting", "interview", "English lesson"), people+roles, projects, named objects.
+    SKIP: action verbs ("call back", "pick up", "check"), generic words without context.
+    Example — transcript "pick up parcel from Nova Poshta, call at 15 if not delivered, English lesson at 12, LinkedIn project":
+      tags: ["call", "English lesson", "Nova Poshta parcel", "LinkedIn project"]
+    Max 5. Return [] if nothing specific.
+- eventDate: ISO 8601 if a specific scheduled event with date+time is mentioned. Resolve relative dates against the recording date. No time → use 09:00. Return null if none.
+
 ${NO_INVENT}`;
 
-type SectionPrompts = Record<SummarySection, string>;
-
-const TEMPLATES: Record<SummaryTemplate, SectionPrompts> = {
-  meeting: {
-    [SummarySection.Executive]:
-      `${LANG} Write a brief executive summary of the meeting: 3-5 sentences about the main outcome. No bullet points, only coherent text. ${NO_INVENT}`,
-    [SummarySection.ActionItems]:
-      `${LANG} Extract all action items from the meeting. For each: who is responsible (if mentioned), what needs to be done, deadline (if mentioned). Format: bullet list.`,
-    [SummarySection.KeyDecisions]:
-      `${LANG} Extract only the key decisions made during the meeting. No discussion details — only final agreements. Format: bullet list.`,
-    [SummarySection.Detailed]:
-      `${LANG} Write a detailed structured summary of the meeting in chronological order. Preserve all important details, numbers, names. ${NO_INVENT}`,
-  },
-  interview: {
-    [SummarySection.Executive]:
-      `${LANG} Summarise this interview in 3-5 sentences: who was interviewed, main topics covered, overall impression. ${NO_INVENT}`,
-    [SummarySection.ActionItems]:
-      `${LANG} List any follow-up actions mentioned during the interview (next steps, reference checks, tasks for either party). Format: bullet list.`,
-    [SummarySection.KeyDecisions]:
-      `${LANG} List the key outcomes or agreements reached during the interview (e.g. candidate progresses, offer discussed, rejection). Format: bullet list.`,
-    [SummarySection.Detailed]:
-      `${LANG} Write a detailed structured summary of the interview: questions asked, answers given, notable moments. ${NO_INVENT}`,
-  },
-  lecture: {
-    [SummarySection.Executive]:
-      `${LANG} Summarise this lecture in 3-5 sentences: main topic, key concepts introduced, learning objectives covered. ${NO_INVENT}`,
-    [SummarySection.ActionItems]:
-      `${LANG} List homework, assignments, or tasks given to students during this lecture. Format: bullet list. If none mentioned, write "No assignments mentioned."`,
-    [SummarySection.KeyDecisions]:
-      `${LANG} List the core concepts or definitions the lecturer emphasised as most important. Format: bullet list.`,
-    [SummarySection.Detailed]:
-      `${LANG} Write detailed structured notes of the lecture in the order topics were covered. Include examples, formulas, and explanations. ${NO_INVENT}`,
-  },
-  sales_call: {
-    [SummarySection.Executive]:
-      `${LANG} Summarise this sales call in 3-5 sentences: prospect profile, main pain points, outcome of the call. ${NO_INVENT}`,
-    [SummarySection.ActionItems]:
-      `${LANG} List all next steps and commitments made by either party on this sales call (demos, proposals, follow-up calls). Format: bullet list with owner and deadline if mentioned.`,
-    [SummarySection.KeyDecisions]:
-      `${LANG} List what was agreed on this call (pricing discussed, objections resolved, deal stage moved). Format: bullet list.`,
-    [SummarySection.Detailed]:
-      `${LANG} Write a detailed structured summary of the sales call: prospect background, pain points raised, solutions presented, objections and responses, closing discussion. ${NO_INVENT}`,
-  },
-  custom: {
-    [SummarySection.Executive]:
-      `${LANG} Write a brief 3-5 sentence summary of the main topic and outcome of this recording. ${NO_INVENT}`,
-    [SummarySection.ActionItems]:
-      `${LANG} Extract any action items, tasks, or next steps mentioned. Format: bullet list. If none, write "No action items mentioned."`,
-    [SummarySection.KeyDecisions]:
-      `${LANG} Extract the key conclusions or decisions reached. Format: bullet list.`,
-    [SummarySection.Detailed]:
-      `${LANG} Write a detailed structured summary covering all important points in the order they were discussed. ${NO_INVENT}`,
-  },
+type RawPayload = {
+  executive?: string;
+  actionItems?: string;
+  keyDecisions?: string;
+  detailed?: string;
+  tasks?: Array<{ text?: unknown }>;
+  tags?: unknown[];
+  eventDate?: string | null;
 };
 
 @Injectable()
@@ -78,54 +54,65 @@ export class OpenAiSummarizationAdapter implements SummarizationPort {
 
   constructor(@Inject(CHAT_COMPLETION_PORT) private readonly chat: ChatCompletionPort) {}
 
-  async summarize(fullText: string, template: SummaryTemplate = SummaryTemplate.Meeting): Promise<TrackSummaries> {
-    const prompts = TEMPLATES[template];
-    this.logger.log(
-      `→ summarize: template=${template} running ${SUMMARY_SECTIONS.length + 1} prompts in parallel (text=${fullText.length} chars)`,
-    );
+  async summarize(fullText: string, template: SummaryTemplate, recordedAt: Date): Promise<SummarizationResult> {
+    const recordingDate = recordedAt.toISOString().slice(0, 10);
+    this.logger.log(`→ summarize: template=${template} recordingDate=${recordingDate} text=${fullText.length} chars`);
     const t0 = Date.now();
 
-    const [textResults, tasksRaw] = await Promise.all([
-      Promise.all(
-        SUMMARY_SECTIONS.map(async (key) => {
-          const text = await this.chat.complete(
-            [
-              { role: 'system', content: prompts[key] },
-              { role: 'user', content: fullText },
-            ],
-            { temperature: 0.2 },
-          );
-          return [key, text] as const;
-        }),
-      ),
-      this.chat.complete(
-        [
-          { role: 'system', content: TASKS_PROMPT },
-          { role: 'user', content: fullText },
-        ],
-        { temperature: 0, responseFormatJson: true },
-      ),
-    ]);
+    const raw = await this.chat.complete(
+      [
+        { role: 'system', content: SYSTEM_PROMPT(template, recordingDate) },
+        { role: 'user', content: fullText.slice(0, 12000) },
+      ],
+      { temperature: 0.2, responseFormatJson: true },
+    );
 
-    const tasks = this.parseTasks(tasksRaw);
-    this.logger.log(`← summarize: all done in ${Date.now() - t0}ms, tasks=${tasks.length}`);
+    try {
+      const p = JSON.parse(raw || '{}') as RawPayload;
 
-    return {
-      ...(Object.fromEntries(textResults) as Omit<TrackSummaries, 'tasks'>),
-      tasks,
-    };
+      const tasks = this.parseTasks(p.tasks);
+      const tags = this.parseTags(p.tags);
+      const eventDate = this.parseEventDate(p.eventDate);
+
+      const summaries: TrackSummaries = {
+        executive:    p.executive    ?? '',
+        actionItems:  p.actionItems  ?? '',
+        keyDecisions: p.keyDecisions ?? '',
+        detailed:     p.detailed     ?? '',
+        tasks,
+      };
+
+      this.logger.log(
+        `← summarize: done in ${Date.now() - t0}ms — tasks=${tasks.length} tags=[${tags.join(', ')}] eventDate=${eventDate?.toISOString() ?? 'null'}`,
+      );
+      return { summaries, tags, eventDate };
+    } catch {
+      this.logger.warn(`Failed to parse summarization response: ${raw?.slice(0, 300)}`);
+      return {
+        summaries: { executive: '', actionItems: '', keyDecisions: '', detailed: '', tasks: [] },
+        tags: [],
+        eventDate: null,
+      };
+    }
   }
 
-  private parseTasks(raw: string): ActionTask[] {
-    try {
-      const parsed = JSON.parse(raw || '[]');
-      if (!Array.isArray(parsed)) return [];
-      return parsed
-        .filter((item): item is { text: string } => typeof item?.text === 'string' && item.text.trim().length > 0)
-        .map((item) => ({ id: randomUUID(), text: item.text.trim(), done: false }));
-    } catch {
-      this.logger.warn(`Failed to parse tasks JSON: ${raw?.slice(0, 200)}`);
-      return [];
-    }
+  private parseTasks(raw: unknown): ActionTask[] {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((item): item is { text: string } => typeof (item as { text?: unknown })?.text === 'string' && (item as { text: string }).text.trim().length > 0)
+      .map((item) => ({ id: randomUUID(), text: (item as { text: string }).text.trim(), done: false }));
+  }
+
+  private parseTags(raw: unknown): string[] {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+      .slice(0, 5);
+  }
+
+  private parseEventDate(raw: string | null | undefined): Date | null {
+    if (!raw) return null;
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d;
   }
 }

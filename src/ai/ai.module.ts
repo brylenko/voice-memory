@@ -12,8 +12,6 @@ import { OpenAiChatCompletionAdapter } from './adapters/openai-chat-completion.a
 import { OpenAiSummarizationAdapter } from './adapters/openai-summarization.adapter';
 import { OpenAiIntentClassifierAdapter } from './adapters/openai-intent-classifier.adapter';
 import { OpenAiStreamingTranscriptionAdapter } from './adapters/openai-streaming-transcription.adapter';
-import { OpenAiTaggingAdapter } from './adapters/openai-tagging.adapter';
-import { TAGGING_PORT } from './ports/tagging.port';
 
 @Global()
 @Module({
@@ -25,8 +23,7 @@ import { TAGGING_PORT } from './ports/tagging.port';
     { provide: SUMMARIZATION_PORT, useClass: OpenAiSummarizationAdapter },
     { provide: INTENT_CLASSIFIER_PORT, useClass: OpenAiIntentClassifierAdapter },
     { provide: STREAMING_TRANSCRIPTION_PORT, useClass: OpenAiStreamingTranscriptionAdapter },
-    { provide: TAGGING_PORT, useClass: OpenAiTaggingAdapter },
   ],
-  exports: [TRANSCRIPTION_PORT, EMBEDDING_PORT, CHAT_COMPLETION_PORT, SUMMARIZATION_PORT, INTENT_CLASSIFIER_PORT, STREAMING_TRANSCRIPTION_PORT, TAGGING_PORT],
+  exports: [TRANSCRIPTION_PORT, EMBEDDING_PORT, CHAT_COMPLETION_PORT, SUMMARIZATION_PORT, INTENT_CLASSIFIER_PORT, STREAMING_TRANSCRIPTION_PORT],
 })
 export class AiModule {}

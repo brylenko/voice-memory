@@ -22,6 +22,15 @@ export class UserEntity {
   @Column({ type: 'int', default: 0 })
   freeTracksUsed: number;
 
+  @Column({ type: 'text', nullable: true, select: false })
+  googleAccessToken: string | null;
+
+  @Column({ type: 'text', nullable: true, select: false })
+  googleRefreshToken: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  googleTokenExpiry: Date | null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 

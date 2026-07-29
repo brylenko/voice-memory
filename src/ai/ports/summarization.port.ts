@@ -8,8 +8,14 @@ export enum SummaryTemplate {
   Custom    = 'custom',
 }
 
+export interface SummarizationResult {
+  summaries: TrackSummaries;
+  tags: string[];
+  eventDate: Date | null;
+}
+
 export interface SummarizationPort {
-  summarize(fullText: string, template?: SummaryTemplate): Promise<TrackSummaries>;
+  summarize(fullText: string, template: SummaryTemplate, recordedAt: Date): Promise<SummarizationResult>;
 }
 
 export const SUMMARIZATION_PORT = Symbol('SUMMARIZATION_PORT');

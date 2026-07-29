@@ -267,6 +267,26 @@ deploying on EC2/ECS/Lambda with an IAM role attached — the AWS SDK's default
 credential chain picks that up automatically. Set them only for local
 development against a real bucket.
 
+### Wiring up Google Calendar
+
+After completing steps 1–4 for Telegram, optionally enable smart calendar tags:
+
+1. Go to [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials)
+2. **Create credentials → OAuth 2.0 Client ID**, type: **Web application**
+3. Authorized redirect URIs: `https://<your-domain>/auth/google/callback`
+4. In [Library](https://console.cloud.google.com/apis/library) enable **Google Calendar API**
+5. Add to `.env`:
+
+```env
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
+GOOGLE_REDIRECT_URI=https://your-domain/auth/google/callback
+```
+
+**How it works:** when a recording is tagged with a meeting-type word (`зустріч`, `call`, `meeting`, `нарада`, `конференція`, ...) the Telegram summary includes a 📅 button. The first click sends the user a Google OAuth link. After authorization, subsequent clicks show a live list of **upcoming events only** (past events are filtered out). Selecting an event saves `calendarEventId` + event title to the track in the DB.
+
+Tokens are stored in `users.googleAccessToken/RefreshToken/TokenExpiry` and refreshed automatically on each Calendar request. Scope: `calendar.readonly`.
+
 ### Wiring up the Telegram channel
 
 1. Create a bot with @BotFather, put its token in `TELEGRAM_BOT_TOKEN`.

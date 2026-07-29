@@ -15,6 +15,8 @@ export default () => ({
     port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
   },
   openaiApiKey: process.env.OPENAI_API_KEY ?? '',
+  // 64 hex chars = 32 bytes = AES-256 key. Leave empty to disable field encryption (dev only).
+  encryptionKey: process.env.ENCRYPTION_KEY ?? '',
   device: {
     hmacSecret: process.env.DEVICE_HMAC_SECRET ?? '',
     signatureTtlSeconds: parseInt(process.env.DEVICE_SIGNATURE_TTL_SECONDS ?? '300', 10),
@@ -22,6 +24,11 @@ export default () => ({
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? '',
     webhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET ?? '',
+  },
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID ?? '',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
+    redirectUri: process.env.GOOGLE_REDIRECT_URI ?? 'http://localhost:3000/auth/google/callback',
   },
   uploadDir: process.env.UPLOAD_DIR ?? './uploads',
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? 'http://localhost:3000',

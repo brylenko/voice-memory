@@ -1,6 +1,6 @@
 {
   "name": "plaud-backend",
-  "version": "1.0.0",
+  "version": "0.1.1-beta",
   "description": "AI voice-recorder backend (STT + RAG over meetings) - NestJS/TypeScript/ESM",
   "license": "UNLICENSED",
   "scripts": {
