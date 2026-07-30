@@ -380,9 +380,13 @@ Client → Server:
   binary frames   — PCM16 mono 24 kHz, ~100 ms chunks
   text "end"      — signals end of recording
 
-Note: `deviceId` is the device serial (same untrusted external ID as `X-Device-Serial` on
-the REST channel) — it is resolved to an internal UUID via the users table, not trusted as-is.
-Passing a guessed UUID without a matching device serial creates an orphan user with no data.
+**Auth trade-off vs REST channel:** The REST channel (`/audio/upload-url`) requires an
+HMAC-SHA256 signature (`X-Device-Serial` + `X-Timestamp` + `X-Signature`) — cryptographic
+proof that the sender owns the serial. The WebSocket channel only has the serial as a plain
+query param — identification, not authentication. Anyone who knows a serial can stream under
+its identity. This is an accepted trade-off while serials are opaque and non-enumerable.
+To reach REST-level parity, add HMAC in a query param or in the first binary frame of the
+handshake — see `DeviceAuthGuard` for the signing scheme.
 
 Server → Client:
   {"type":"transcript","text":"..."}               — live word-by-word delta
@@ -518,6 +522,7 @@ A user hits the free gate first (track count). Once they upgrade, the minutes ga
   uploads" above); `AudioProcessorProcessor` could compare it against the
   real duration from `AudioMetadataPort` after download and flag/adjust large
   mismatches — not implemented.
+- **WebSocket auth gap** — the REST channel verifies device ownership via HMAC-SHA256 (`DeviceAuthGuard`); the WebSocket channel only identifies the device by serial number in a query param — no cryptographic proof. Add HMAC in the handshake query or first binary frame to reach parity. Acceptable while serials are opaque and non-enumerable; not acceptable if serials are ever logged or shared.
 - No app-level rate limiting — relying entirely on OpenAI's own limits.
 - One static HMAC secret for all devices — no per-device secret or rotation.
 - Secrets currently come from `.env` / plain environment variables — move to

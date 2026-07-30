@@ -84,7 +84,12 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   handleConnection(client: WebSocket, req: IncomingMessage) {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
-    const externalId = url.searchParams.get('deviceId') ?? url.searchParams.get('userId') ?? '';
+    // Security note: deviceId is an identifier, not a credential — there is no
+    // cryptographic proof of ownership here (unlike the REST channel's HMAC guard).
+    // Known trade-off: anyone who knows a device serial can stream under its identity.
+    // Acceptable while serials are opaque and non-enumerable; add HMAC in query/first-frame
+    // if WebSocket needs REST-level auth parity.
+    const externalId = url.searchParams.get('deviceId') ?? '';
     const lang       = url.searchParams.get('lang') ?? undefined;
 
     if (!externalId) {
