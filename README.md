@@ -374,11 +374,15 @@ The backend is ready to accept audio from smart glasses out of the box — no ba
 ### Protocol
 
 ```
-WebSocket: ws(s)://your-server/audio/live?userId=<uuid>&lang=en
+WebSocket: ws(s)://your-server/audio/live?deviceId=<device-serial>&lang=en
 
 Client → Server:
   binary frames   — PCM16 mono 24 kHz, ~100 ms chunks
   text "end"      — signals end of recording
+
+Note: `deviceId` is the device serial (same untrusted external ID as `X-Device-Serial` on
+the REST channel) — it is resolved to an internal UUID via the users table, not trusted as-is.
+Passing a guessed UUID without a matching device serial creates an orphan user with no data.
 
 Server → Client:
   {"type":"transcript","text":"..."}               — live word-by-word delta
@@ -483,6 +487,13 @@ Not served in production — the static middleware is only mounted when `ENV=dev
 ## Path to production — known gaps, ranked by severity
 
 ### 🔴 Blockers — do not deploy without these
+
+**Two quota gates — understand the model before enabling either:**
+There are two independent quota mechanisms. They are intentionally separate tiers, not duplicates:
+- `freeTracksUsed` / `FREE_TRACKS_LIMIT` — **free tier gate** (tracks count). Active in the WebSocket gateway right now. Flip `PAYMENT_REQUIRED=true` to enforce it.
+- `BalanceCheckerPort` / minutes — **paid tier gate** (minutes consumed). Wired correctly in `IngestAudioService`, but `MockBalanceCheckerAdapter` always returns 999 minutes — it is a stub. Replace with a real adapter backed by a `wallets` table and payment-provider webhooks (Stripe etc.) before charging users.
+
+A user hits the free gate first (track count). Once they upgrade, the minutes gate takes over. Make sure both thresholds are configured consistently or users can be blocked earlier than expected.
 
 - **`MockBalanceCheckerAdapter` (`src/billing/`) is a mock** — always reports
   999 minutes and only logs consumption instead of persisting it. Set

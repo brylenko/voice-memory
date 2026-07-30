@@ -42,8 +42,10 @@ type ServerEvent = TranscriptDelta | DoneEvent | ErrorEvent;
  *   {"type":"error","message":"..."}                — something went wrong
  *
  * Query params:
- *   userId — UUID from the users table (required)
- *   lang   — BCP-47 language hint, e.g. "uk", "en" (optional)
+ *   deviceId — device serial / Telegram ID (required); treated as untrusted external ID,
+ *              resolved to internal UUID via users table (same as X-Device-Serial on HTTP).
+ *              NOT a raw UUID — passing a guessed UUID will simply create a new orphan user.
+ *   lang      — BCP-47 language hint, e.g. "uk", "en" (optional)
  */
 @WebSocketGateway({ path: '/audio/live' })
 export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -82,8 +84,13 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   handleConnection(client: WebSocket, req: IncomingMessage) {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
-    const externalId = url.searchParams.get('userId') ?? 'anonymous';
+    const externalId = url.searchParams.get('deviceId') ?? url.searchParams.get('userId') ?? '';
     const lang       = url.searchParams.get('lang') ?? undefined;
+
+    if (!externalId) {
+      client.close(1008, 'deviceId query param is required');
+      return;
+    }
 
     this.logger.log(`Client connected (externalId=${externalId})`);
 
@@ -135,7 +142,7 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
     userId: string,
     lang: string | undefined,
   ): Promise<void> {
-    if (userId === 'anonymous') return;
+    if (!userId) return;
 
     // Create track immediately so partial text is never lost
     const track = await this.trackRepo.save(

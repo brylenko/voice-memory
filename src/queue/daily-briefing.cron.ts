@@ -7,6 +7,27 @@ import { UserEntity } from '../user/user.entity';
 import { TelegramApiClient } from '../audio-ingest/adapters/inbound/telegram/telegram-api.client';
 import { EncryptionService } from '../common/services/encryption.service';
 
+// Round eventDate to HH:MM in Kyiv time — used as de-dup key
+function timeSlotKey(track: AudioTrackEntity): string {
+  const time = track.eventDate!.toLocaleTimeString('en-GB', {
+    hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv',
+  });
+  return `${track.userId}:${time}`;
+}
+
+// Keep only the most recently created track per (userId, HH:MM) slot
+function deduplicateByTimeSlot(tracks: AudioTrackEntity[]): AudioTrackEntity[] {
+  const best = new Map<string, AudioTrackEntity>();
+  for (const t of tracks) {
+    const key = timeSlotKey(t);
+    const existing = best.get(key);
+    if (!existing || t.createdAt > existing.createdAt) {
+      best.set(key, t);
+    }
+  }
+  return [...best.values()].sort((a, b) => a.eventDate!.getTime() - b.eventDate!.getTime());
+}
+
 @Injectable()
 export class DailyBriefingCron {
   private readonly logger = new Logger(DailyBriefingCron.name);
@@ -43,9 +64,14 @@ export class DailyBriefingCron {
     const newTracks = upcoming.filter((t) => !this.notified.has(t.id));
     if (newTracks.length === 0) return;
 
+    // De-duplicate by eventDate rounded to the minute — multiple recordings
+    // about the same event should produce one notification, not N.
+    // Keep the most recently created track per (userId, HH:MM slot).
+    const deduped = deduplicateByTimeSlot(newTracks);
+
     // Group by userId
     const byUser = new Map<string, AudioTrackEntity[]>();
-    for (const track of newTracks) {
+    for (const track of deduped) {
       const list = byUser.get(track.userId) ?? [];
       list.push(track);
       byUser.set(track.userId, list);
@@ -72,7 +98,11 @@ export class DailyBriefingCron {
 
       try {
         await this.telegram.sendMessage(user.telegramId, text, 'HTML');
-        tracks.forEach((t) => this.notified.set(t.id, now.getTime()));
+        // Mark all tracks in the same time slot as notified, not just the winner,
+        // so duplicates are suppressed on the next cron tick too.
+        upcoming
+          .filter((t) => t.userId === userId)
+          .forEach((t) => this.notified.set(t.id, now.getTime()));
         this.logger.log(`Briefing sent to user ${userId}: ${tracks.length} event(s)`);
       } catch (err) {
         this.logger.error(`Failed to send briefing to ${userId}: ${(err as Error).message}`);
