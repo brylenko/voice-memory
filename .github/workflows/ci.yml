@@ -43,4 +43,4 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build Docker image
-        run: docker build -t plaud-backend:ci .
+        run: docker build -t ai-voice-assistant:ci .
