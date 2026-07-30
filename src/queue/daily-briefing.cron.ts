@@ -87,9 +87,12 @@ export class DailyBriefingCron {
         const time = t.eventDate!.toLocaleTimeString('en-GB', {
           hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Kyiv',
         });
-        const tagsStr = t.tags.length > 0 ? t.tags.map((tag) => `#${tag}`).join(' ') : '';
-        const summary = t.summaries?.executive?.slice(0, 100) ?? '';
-        return `🕐 <b>${time}</b>${tagsStr ? ' — ' + tagsStr : ''}\n${summary}`;
+        // Show only short noun-tags (≤3 words); skip action-phrase tags from legacy records
+        const cleanTags = t.tags.filter((tag) => tag.trim().split(/\s+/).length <= 3);
+        const tagsStr = cleanTags.length > 0 ? cleanTags.map((tag) => `#${tag}`).join(' ') : '';
+        const executive = t.summaries?.executive ?? '';
+        const firstSentence = executive.match(/^[^.!?]+[.!?]/)?.[0] ?? executive.slice(0, 120);
+        return `🕐 <b>${time}</b>${tagsStr ? ' — ' + tagsStr : ''}\n${firstSentence}`;
       });
 
       const text = lines.length === 1
