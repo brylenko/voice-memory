@@ -1,13 +1,17 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { InjectQueue } from '@nestjs/bull';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
+import type { Queue } from 'bull';
 import { AudioTrackEntity, AudioTrackStatus, TrackSummaries } from '../audio-track/audio-track.entity';
 import type { ActionTask } from '../audio-track/audio-track.entity';
 import { CHAT_COMPLETION_PORT, ChatCompletionPort } from '../ai/ports/chat-completion.port';
 import { SUMMARIZATION_PORT, SummarizationPort, SummaryTemplate } from '../ai/ports/summarization.port';
 import { EncryptionService } from '../common/services/encryption.service';
+
+const STALE_INITIALIZED_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
 const TASKS_PROMPT =
   'Extract all action items / tasks from the transcript. ' +
@@ -26,10 +30,17 @@ export class BackfillTasksCron {
     @Inject(CHAT_COMPLETION_PORT) private readonly chat: ChatCompletionPort,
     @Inject(SUMMARIZATION_PORT) private readonly summarization: SummarizationPort,
     private readonly encryption: EncryptionService,
+    @InjectQueue('audio-processing') private readonly queue: Queue,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
   async run(): Promise<void> {
+    // Reconcile stale INITIALIZED tracks before acquiring the processing lock.
+    // Tracks stuck in INITIALIZED longer than the threshold indicate a DB-commit-success
+    // + Redis-enqueue-failure scenario. Re-enqueueing is safe: replaceChunks and the
+    // conditional COMPLETED update make the processor idempotent on retry.
+    await this.reconcileStaleInitialized();
+
     if (this.running) return;
 
     const [tasksRaw, tagsNeeded] = await Promise.all([
@@ -96,6 +107,32 @@ export class BackfillTasksCron {
       }
     } finally {
       this.running = false;
+    }
+  }
+
+  private async reconcileStaleInitialized(): Promise<void> {
+    const staleThreshold = new Date(Date.now() - STALE_INITIALIZED_THRESHOLD_MS);
+    const stale = await this.trackRepo
+      .createQueryBuilder('t')
+      .where('t.status = :status', { status: AudioTrackStatus.INITIALIZED })
+      .andWhere('t."createdAt" < :threshold', { threshold: staleThreshold })
+      .limit(20)
+      .getMany();
+
+    if (stale.length === 0) return;
+    this.logger.warn(`Reconciler: ${stale.length} stale INITIALIZED track(s) — re-enqueueing`);
+
+    for (const track of stale) {
+      try {
+        await this.queue.add(
+          'process-audio-track',
+          { trackId: track.id, storageKey: track.fileUrl, userId: track.userId },
+          { attempts: 5, backoff: { type: 'exponential', delay: 10000 }, removeOnComplete: true, removeOnFail: false },
+        );
+        this.logger.log(`Reconciler: re-enqueued track ${track.id}`);
+      } catch (err) {
+        this.logger.error(`Reconciler: failed to re-enqueue track ${track.id}: ${(err as Error).message}`);
+      }
     }
   }
 

@@ -85,19 +85,29 @@ export class AudioProcessorProcessor {
       this.logger.log(`[${trackId}] C+D: done in ${Date.now() - t2}ms — tags: ${tags.join(', ')} | eventDate: ${eventDate?.toISOString() ?? 'null'}`);
 
       // --- Step F: save results + full-text search vector ---
+      // Conditional update: only transition PROCESSING → COMPLETED on the first completion.
+      // If a retry races in after the first job already finished, affected=0 and we skip
+      // the usage increment — preventing double-counting freeTracksUsed.
       const encryptedFullText = this.encryption.encrypt(fullText);
       const encryptedSummaries = this.encryption.encryptJson(summaries);
-      await this.trackRepo.manager.query(
+      const updateResult: Array<{ userId: string }> = await this.trackRepo.manager.query(
         `UPDATE audio_tracks
          SET summaries = $1, tags = $2, "fullText" = $3,
              "searchVector" = to_tsvector('simple', $4),
              "eventDate" = $5,
              "tagsProcessed" = TRUE,
              status = $6
-         WHERE id = $7`,
+         WHERE id = $7 AND status != $6
+         RETURNING "userId"`,
         [encryptedSummaries, tags, encryptedFullText, fullText, eventDate, AudioTrackStatus.COMPLETED, trackId],
       );
-      this.logger.log(`[${trackId}] F: saved summaries + tags + full-text index, status=COMPLETED`);
+      const isFirstCompletion = updateResult.length > 0;
+      this.logger.log(`[${trackId}] F: saved summaries + tags + full-text index, status=COMPLETED (firstCompletion=${isFirstCompletion})`);
+
+      if (!isFirstCompletion) {
+        this.logger.warn(`[${trackId}] F: skipping usage increment — track was already COMPLETED (duplicate job)`);
+        return;
+      }
 
       await this.userRepo.increment({ id: track.userId }, 'freeTracksUsed', 1);
 

@@ -72,10 +72,19 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
   ) {}
 
   private async resolveUser(externalId: string): Promise<{ id: string; quotaExceeded: boolean }> {
-    let user = await this.userRepo.findOneBy({ deviceId: externalId });
-    if (!user) {
-      user = await this.userRepo.save(this.userRepo.create({ deviceId: externalId }));
-      this.logger.log(`Created new user for deviceId=${externalId}: ${user.id}`);
+    // Atomic upsert prevents UNIQUE violation under concurrent connections from the same device.
+    const rows: Array<{ id: string }> = await this.userRepo.manager.query(
+      `INSERT INTO users ("deviceId") VALUES ($1)
+       ON CONFLICT ("deviceId") DO NOTHING
+       RETURNING id`,
+      [externalId],
+    );
+    let user: { id: string; freeTracksUsed: number };
+    if (rows.length > 0) {
+      this.logger.log(`Created new user for deviceId=${externalId}: ${rows[0].id}`);
+      user = { id: rows[0].id, freeTracksUsed: 0 };
+    } else {
+      user = (await this.userRepo.findOneByOrFail({ deviceId: externalId })) as { id: string; freeTracksUsed: number };
     }
     const limit = this.config.get<number>('payment.freeTracksLimit') ?? 10;
     const quotaExceeded = limit > 0 && user.freeTracksUsed >= limit;
@@ -101,26 +110,51 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     const audioPassthrough = new Readable({ read() {} });
     this.sessions.set(client, audioPassthrough);
-    let audioStarted = false;
     const deltas: string[] = [];
+
+    // Authorization state machine: buffer incoming audio frames until resolveUser
+    // completes. This guarantees no audio is pushed to OpenAI before auth succeeds.
+    type AuthState = 'pending' | 'authorized' | 'rejected';
+    let authState: AuthState = 'pending';
+    const pendingFrames: Buffer[] = [];
 
     client.on('message', (data, isBinary) => {
       if (isBinary) {
-        if (!audioStarted) {
-          audioStarted = true;
-          void this.resolveUser(externalId).then(({ id: userId, quotaExceeded }) => {
-            if (quotaExceeded && this.config.get<boolean>('payment.required')) {
-              this.send(client, {
-                type: 'error',
-                message: 'Free quota exceeded. Please upgrade to continue.',
-                paymentUrl: this.config.get<string>('payment.url'),
-              });
+        if (authState === 'rejected') return;
+
+        if (authState === 'pending') {
+          pendingFrames.push(data as Buffer);
+          if (pendingFrames.length === 1) {
+            // First frame — kick off auth once; subsequent frames just buffer.
+            void this.resolveUser(externalId).then(({ id: userId, quotaExceeded }) => {
+              if (quotaExceeded && this.config.get<boolean>('payment.required')) {
+                authState = 'rejected';
+                pendingFrames.length = 0;
+                this.send(client, {
+                  type: 'error',
+                  message: 'Free quota exceeded. Please upgrade to continue.',
+                  paymentUrl: this.config.get<string>('payment.url'),
+                });
+                client.close();
+                return;
+              }
+              // Auth succeeded — flush buffered frames then start session.
+              authState = 'authorized';
+              for (const frame of pendingFrames) audioPassthrough.push(frame);
+              pendingFrames.length = 0;
+              void this.runSession(client, audioPassthrough, deltas, userId, lang);
+            }).catch((err: Error) => {
+              authState = 'rejected';
+              pendingFrames.length = 0;
+              this.logger.error(`resolveUser failed: ${err.message}`);
+              this.send(client, { type: 'error', message: 'Authorization failed' });
               client.close();
-              return;
-            }
-            void this.runSession(client, audioPassthrough, deltas, userId, lang);
-          });
+            });
+          }
+          return;
         }
+
+        // authState === 'authorized'
         audioPassthrough.push(data as Buffer);
         return;
       }
