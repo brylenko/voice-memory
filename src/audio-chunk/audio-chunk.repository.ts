@@ -29,10 +29,14 @@ export interface SimilaritySearchResult {
 export class AudioChunkRepository {
   constructor(private readonly dataSource: DataSource) {}
 
-  async insertMany(chunks: InsertChunkInput[]): Promise<void> {
+  async replaceChunks(chunks: InsertChunkInput[]): Promise<void> {
     if (chunks.length === 0) return;
 
+    const trackId = chunks[0].trackId;
     await this.dataSource.transaction(async (manager) => {
+      // Delete before re-inserting so worker retries don't accumulate duplicate
+      // embedding rows for the same track (which would corrupt RAG results).
+      await manager.query(`DELETE FROM audio_chunks WHERE "trackId" = $1`, [trackId]);
       for (const chunk of chunks) {
         await manager.query(
           `INSERT INTO audio_chunks
@@ -49,6 +53,11 @@ export class AudioChunkRepository {
         );
       }
     });
+  }
+
+  /** @deprecated Use replaceChunks for idempotent upsert; this is kept for tests only. */
+  async insertMany(chunks: InsertChunkInput[]): Promise<void> {
+    return this.replaceChunks(chunks);
   }
 
   /**

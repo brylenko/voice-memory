@@ -180,7 +180,9 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
         if (unflushedChars >= FLUSH_EVERY) {
           unflushedChars = 0;
-          void flushText(deltas.join(''));
+          flushText(deltas.join('')).catch((err: Error) =>
+            this.logger.error(`[${track.id}] partial text flush failed: ${err.message}`),
+          );
         }
       }
 
@@ -227,7 +229,7 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (textChunks.length > 0) {
       const vectors = await this.embedding.embed(textChunks);
       const now = new Date();
-      await this.chunkRepo.insertMany(
+      await this.chunkRepo.replaceChunks(
         textChunks.map((text, i) => ({
           trackId,
           userId,

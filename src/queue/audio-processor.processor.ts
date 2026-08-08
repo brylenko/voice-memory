@@ -38,7 +38,7 @@ export class AudioProcessorProcessor {
     private readonly encryption: EncryptionService,
   ) {}
 
-  @Process({ name: 'process-audio-track', concurrency: 20 })
+  @Process({ name: 'process-audio-track', concurrency: 5 })
   async handleProcessAudioTrack(job: Job<AudioProcessingJob>): Promise<void> {
     const { trackId, storageKey, userId } = job.data;
 
@@ -160,7 +160,7 @@ export class AudioProcessorProcessor {
       createdAt: now,
     }));
 
-    await this.chunkRepo.insertMany(inserts);
+    await this.chunkRepo.replaceChunks(inserts);
   }
 }
 

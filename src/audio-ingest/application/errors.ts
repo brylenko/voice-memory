@@ -18,3 +18,20 @@ export class TrackNotFoundError extends Error {
     this.name = 'TrackNotFoundError';
   }
 }
+
+export class TrackOwnershipError extends Error {
+  constructor(public readonly trackId: string) {
+    super(`Track ${trackId} does not belong to the requesting user`);
+    this.name = 'TrackOwnershipError';
+  }
+}
+
+export class TrackAlreadyProcessingError extends Error {
+  constructor(
+    public readonly trackId: string,
+    public readonly currentStatus: string,
+  ) {
+    super(`Track ${trackId} is already ${currentStatus} — duplicate complete-upload ignored`);
+    this.name = 'TrackAlreadyProcessingError';
+  }
+}

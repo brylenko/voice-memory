@@ -1,7 +1,7 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { AudioTrackEntity, AudioTrackStatus } from '../../../../audio-track/audio-track.entity';
+import { AudioTrackEntity, AudioTrackStatus, TrackSummaries } from '../../../../audio-track/audio-track.entity';
 import type { ActionTask } from '../../../../audio-track/audio-track.entity';
 import { CHAT_COMPLETION_PORT, ChatCompletionPort } from '../../../../ai/ports/chat-completion.port';
 import { EncryptionService } from '../../../../common/services/encryption.service';
@@ -62,9 +62,14 @@ export class TasksService {
     const updatedTasks = [...(track.summaries!.tasks)];
     updatedTasks[index] = { ...task, done: true };
 
-    await this.trackRepo.update(trackId, {
-      summaries: this.encryption.encryptJson({ ...track.summaries!, tasks: updatedTasks }) as any,
-    });
+    // summaries column is TEXT (encrypted JSON string) — TypeORM entity declares it as
+    // TrackSummaries for read convenience, but we write the encrypted string directly.
+    await this.trackRepo
+      .createQueryBuilder()
+      .update()
+      .set({ summaries: this.encryption.encryptJson({ ...track.summaries!, tasks: updatedTasks }) as unknown as TrackSummaries })
+      .where('id = :id', { id: trackId })
+      .execute();
 
     this.logger.log(`markDone: task "${task.text}" on track ${trackId}`);
     return task;

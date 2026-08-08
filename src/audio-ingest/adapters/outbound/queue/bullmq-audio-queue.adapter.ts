@@ -17,7 +17,12 @@ export class BullMqAudioQueueAdapter implements AudioProcessingQueuePort {
     await this.queue.add(
       'process-audio-track',
       { trackId: input.trackId, storageKey: input.storageKey, userId: input.userId, preTranscribedText: input.preTranscribedText, detectedTemplate: input.detectedTemplate },
-      { attempts: 3, backoff: { type: 'exponential', delay: 5000 }, removeOnComplete: true },
+      {
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 10000 },
+        removeOnComplete: true,
+        removeOnFail: false, // retain failed jobs in Redis for inspection
+      },
     );
   }
 }

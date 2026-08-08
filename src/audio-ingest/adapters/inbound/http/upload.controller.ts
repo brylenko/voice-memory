@@ -23,7 +23,12 @@ import {
   COMPLETE_UPLOAD_USE_CASE,
   CompleteUploadUseCase,
 } from '../../../application/ports/inbound/complete-upload.use-case';
-import { InsufficientBalanceError, TrackNotFoundError } from '../../../application/errors';
+import {
+  InsufficientBalanceError,
+  TrackAlreadyProcessingError,
+  TrackNotFoundError,
+  TrackOwnershipError,
+} from '../../../application/errors';
 import { UserEntity } from '../../../../user/user.entity';
 
 class RequestUploadDto {
@@ -93,13 +98,24 @@ export class UploadController {
   @Post('upload-complete')
   @UseGuards(DeviceAuthGuard)
   @HttpCode(HttpStatus.ACCEPTED)
-  async completeUploadEndpoint(@Body() dto: CompleteUploadDto) {
+  async completeUploadEndpoint(
+    @Body() dto: CompleteUploadDto,
+    @Req() req: Request & { deviceSerial: string },
+  ) {
+    const userId = await this.resolveUserId(req.deviceSerial);
     try {
-      const result = await this.completeUpload.execute({ trackId: dto.trackId });
+      const result = await this.completeUpload.execute({ trackId: dto.trackId, userId });
       return { ...result, message: 'Upload accepted, processing started' };
     } catch (error) {
       if (error instanceof TrackNotFoundError) {
         throw new NotFoundException(error.message);
+      }
+      if (error instanceof TrackOwnershipError) {
+        throw new ForbiddenException(error.message);
+      }
+      if (error instanceof TrackAlreadyProcessingError) {
+        // Idempotent: device retried upload-complete — acknowledge without creating duplicate job
+        return { message: error.message };
       }
       throw error;
     }

@@ -1,8 +1,8 @@
-import { Controller, NotFoundException, Param, Put, Req, Res } from '@nestjs/common';
+import { Controller, ForbiddenException, NotFoundException, Param, Put, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { createWriteStream } from 'fs';
-import { join, normalize } from 'path';
+import { join, normalize, resolve, sep } from 'path';
 
 /**
  * Dev-only counterpart to S3's presigned PUT — exists purely so
@@ -31,6 +31,13 @@ export class LocalUploadController {
     const safeUserId = userId.replace(/[^a-zA-Z0-9_-]/g, '');
     const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '');
     const targetPath = normalize(join(uploadDir, safeUserId, safeName));
+
+    // Ensure the resolved path stays within uploadDir even after sanitization.
+    const resolvedUploadDir = resolve(uploadDir);
+    const resolvedTarget = resolve(targetPath);
+    if (!resolvedTarget.startsWith(resolvedUploadDir + sep) && resolvedTarget !== resolvedUploadDir) {
+      throw new ForbiddenException('Invalid upload path');
+    }
 
     await new Promise<void>((resolve, reject) => {
       const writeStream = createWriteStream(targetPath);

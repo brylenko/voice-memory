@@ -3,7 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
-import { AudioTrackEntity, AudioTrackStatus } from '../audio-track/audio-track.entity';
+import { AudioTrackEntity, AudioTrackStatus, TrackSummaries } from '../audio-track/audio-track.entity';
 import type { ActionTask } from '../audio-track/audio-track.entity';
 import { CHAT_COMPLETION_PORT, ChatCompletionPort } from '../ai/ports/chat-completion.port';
 import { SUMMARIZATION_PORT, SummarizationPort, SummaryTemplate } from '../ai/ports/summarization.port';
@@ -67,9 +67,12 @@ export class BackfillTasksCron {
           // track.fullText is already decrypted (decryptTrack called above)
           const tasks = await this.extractTasks(track.fullText!);
           const encryptedSummaries = this.encryption.encryptJson({ ...track.summaries!, tasks });
-          await this.trackRepo.update(track.id, {
-            summaries: encryptedSummaries as any,
-          });
+          await this.trackRepo
+            .createQueryBuilder()
+            .update()
+            .set({ summaries: encryptedSummaries as unknown as TrackSummaries })
+            .where('id = :id', { id: track.id })
+            .execute();
           this.logger.log(`✓ tasks: track ${track.id} — ${tasks.length} task(s)`);
         } catch (err) {
           this.logger.error(`✗ tasks: track ${track.id} — ${(err as Error).message}`);
@@ -83,7 +86,7 @@ export class BackfillTasksCron {
           await this.trackRepo
             .createQueryBuilder()
             .update()
-            .set({ tags, eventDate, tagsProcessed: true } as any)
+            .set({ tags, eventDate, tagsProcessed: true })
             .where('id = :id', { id: track.id })
             .execute();
           this.logger.log(`✓ tags: track ${track.id} — ${tags.join(', ')} | eventDate: ${eventDate?.toISOString() ?? 'null'}`);

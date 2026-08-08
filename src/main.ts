@@ -28,7 +28,7 @@ async function bootstrap() {
 
   const port = config.get<number>('port') ?? 3000;
   await app.listen(port);
-  console.log(`plaud-backend listening on port ${port}`);
+  console.log(`voice-memory listening on port ${port}`);
 
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     process.on(signal, async () => {
