@@ -36,6 +36,10 @@ export class WsHmacAuthService {
       throw new WsAuthError('Missing authentication parameters');
     }
 
+    // Reject non-digit characters (e.g. "123abc") that parseInt silently accepts.
+    if (!/^\d+$/.test(tsRaw)) {
+      throw new WsAuthError('Invalid timestamp');
+    }
     const ts = parseInt(tsRaw, 10);
     if (!Number.isFinite(ts)) {
       throw new WsAuthError('Invalid timestamp');

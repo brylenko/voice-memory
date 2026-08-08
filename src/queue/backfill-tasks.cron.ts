@@ -1,15 +1,17 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { InjectQueue } from '@nestjs/bull';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
-import type { Queue } from 'bull';
 import { AudioTrackEntity, AudioTrackStatus, TrackSummaries } from '../audio-track/audio-track.entity';
 import type { ActionTask } from '../audio-track/audio-track.entity';
 import { CHAT_COMPLETION_PORT, ChatCompletionPort } from '../ai/ports/chat-completion.port';
 import { SUMMARIZATION_PORT, SummarizationPort, SummaryTemplate } from '../ai/ports/summarization.port';
 import { EncryptionService } from '../common/services/encryption.service';
+import {
+  AUDIO_PROCESSING_QUEUE_PORT,
+  AudioProcessingQueuePort,
+} from '../audio-ingest/application/ports/outbound/audio-processing-queue.port';
 
 const STALE_INITIALIZED_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -30,7 +32,7 @@ export class BackfillTasksCron {
     @Inject(CHAT_COMPLETION_PORT) private readonly chat: ChatCompletionPort,
     @Inject(SUMMARIZATION_PORT) private readonly summarization: SummarizationPort,
     private readonly encryption: EncryptionService,
-    @InjectQueue('audio-processing') private readonly queue: Queue,
+    @Inject(AUDIO_PROCESSING_QUEUE_PORT) private readonly processingQueue: AudioProcessingQueuePort,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -124,11 +126,14 @@ export class BackfillTasksCron {
 
     for (const track of stale) {
       try {
-        await this.queue.add(
-          'process-audio-track',
-          { trackId: track.id, storageKey: track.fileUrl, userId: track.userId },
-          { attempts: 5, backoff: { type: 'exponential', delay: 10000 }, removeOnComplete: true, removeOnFail: false },
-        );
+        // Uses the same AudioProcessingQueuePort as upload-complete — jobId=trackId
+        // is set inside BullMqAudioQueueAdapter, so concurrent reconciliation + upload-complete
+        // calls for the same track produce at most one pending job.
+        await this.processingQueue.enqueue({
+          trackId: track.id,
+          storageKey: track.fileUrl,
+          userId: track.userId,
+        });
         this.logger.log(`Reconciler: re-enqueued track ${track.id}`);
       } catch (err) {
         this.logger.error(`Reconciler: failed to re-enqueue track ${track.id}: ${(err as Error).message}`);

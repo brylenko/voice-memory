@@ -17,6 +17,8 @@ import { AUDIO_RETRIEVAL_PORT } from './ports/audio-retrieval.port';
 import { LocalDiskRetrievalAdapter } from './adapters/local-disk-retrieval.adapter';
 import { S3RetrievalAdapter } from './adapters/s3-retrieval.adapter';
 import { TelegramApiClient } from '../audio-ingest/adapters/inbound/telegram/telegram-api.client';
+import { AUDIO_PROCESSING_QUEUE_PORT } from '../audio-ingest/application/ports/outbound/audio-processing-queue.port';
+import { BullMqAudioQueueAdapter } from '../audio-ingest/adapters/outbound/queue/bullmq-audio-queue.adapter';
 
 @Module({
   imports: [
@@ -35,6 +37,8 @@ import { TelegramApiClient } from '../audio-ingest/adapters/inbound/telegram/tel
     TelegramApiClient,
     LocalDiskRetrievalAdapter,
     S3RetrievalAdapter,
+    BullMqAudioQueueAdapter,
+    { provide: AUDIO_PROCESSING_QUEUE_PORT, useExisting: BullMqAudioQueueAdapter },
     {
       // Must track the same STORAGE_DRIVER value as AudioIngestModule's
       // AUDIO_STORAGE_PORT binding — whichever adapter wrote the file is the

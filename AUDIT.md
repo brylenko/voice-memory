@@ -1,5 +1,5 @@
 # Production Audit — voice-memory
-_Дата: 2026-08-07 | Ревізор: Senior Backend Engineer | Статус: Phase 1 Complete_
+_Дата: 2026-08-07 | Ревізор: Senior Backend Engineer | Статус: Phase 1 + 2 + 3 Complete_
 
 ---
 
@@ -15,32 +15,25 @@ _Дата: 2026-08-07 | Ревізор: Senior Backend Engineer | Статус: 
 
 ### C1 — Duplicate audio_chunks при BullMQ job retry
 
-**Файли:** `audio-processor.processor.ts:80–83`, `audio-chunk.repository.ts:32`
-**Статус після Phase 1:** ✅ Виправлено (`replaceChunks` = DELETE + INSERT у транзакції)
+**Файли:** `audio-processor.processor.ts`, `audio-chunk.repository.ts`
+**Статус після Phase 1+2+3:** ✅ Виправлено
 
-**Failure scenario (до виправлення):**
-```
-Worker attempt 1:
-  STT → ok (fullText готовий)
-  summarize() → ok
-  embedAndStoreChunks() → INSERT 5 chunks → ok
-  UPDATE audio_tracks ... status=COMPLETED → process crash / network timeout
-  → job не ACK-нуто → BullMQ вважає job застряглою
+**Реалізований механізм:**
 
-Worker attempt 2 (retry):
-  STT → пропущено (pre-transcribed або re-transcribed)
-  embedAndStoreChunks() → INSERT ще 5 chunks для того ж trackId
-  UPDATE audio_tracks → COMPLETED
+`replaceChunks(trackId, chunks)` — завжди приймає `trackId` явно, незалежно від `chunks.length`:
+1. `pg_advisory_xact_lock(hashtext(trackId))` — серіалізує concurrent workers для одного треку
+2. `DELETE FROM audio_chunks WHERE trackId = $1` — прибирає stale chunks навіть якщо `chunks = []`
+3. `INSERT` для кожного нового chunk
 
-Результат: audio_chunks містить 10 рядків замість 5 для одного треку.
-RAG пошук повертає кожен фрагмент двічі — відповідь виглядає повторювальною,
-cosine distance rankings спотворені.
-```
+**Чому безпечно:**
+- Advisory lock (transaction-scoped) гарантує серіалізацію — два concurrent workers для одного trackId виконуються по черзі, результат завжди один повний consistent set
+- `DELETE` виконується навіть при `chunks=[]` — retry з порожнім embedding результатом не залишає stale chunks
+- Lock автоматично знімається при commit/rollback
 
-**Чому `replaceChunks` безпечний при retry/concurrency:**
-- `DELETE WHERE trackId = $1` + `INSERT` виконуються в одній транзакції з `SERIALIZABLE`-рівнем (PostgreSQL гарантує атомарність)
-- Якщо два workers стартують одночасно для одного trackId (race між retry і новим job): перший DELETE+INSERT завершується, другий виконує ще один DELETE+INSERT → результат ідентичний, немає дублів
-- `audio_chunks` не має UNIQUE constraint на `(trackId, text)` — але DELETE зачищає всі старі рядки перед INSERT, тому кількість рядків завжди рівна кількості chunks поточного запуску
+**PR review fix (Issue #2):**
+- До виправлення: `if (chunks.length === 0) return` → stale chunks залишались при retry з empty STT
+- До виправлення: advisory lock відсутній → concurrent workers могли змішати chunks двох наборів
+- Сигнатура змінена: `replaceChunks(trackId, chunks)` — trackId завжди явний
 
 ---
 
@@ -108,8 +101,8 @@ try {
 
 ### C3 — DB → Queue gap: track застрягає в INITIALIZED якщо Redis недоступний
 
-**Файли:** `ingest-audio.service.ts:51–73`, `complete-upload.service.ts:30`
-**Статус:** ⚠️ Не виправлено
+**Файли:** `ingest-audio.service.ts`, `complete-upload.service.ts`, `backfill-tasks.cron.ts`
+**Статус:** ✅ Виправлено (reconciliation в BackfillTasksCron)
 
 **Failure scenario:**
 ```
@@ -140,29 +133,27 @@ POST /audio/upload-complete:
 - INITIALIZED треки без job залишаються orphaned назавжди
 - При Redis restart треки не підхоплюються автоматично
 
-**Proposed solution:**
+**Реалізований механізм:**
 
-Найпростіший підхід: додати `BackfillInitializedCron` який прибирає застряглі INITIALIZED треки:
-```typescript
-// Кожні 5 хвилин:
-SELECT * FROM audio_tracks
-WHERE status = 'INITIALIZED' AND "createdAt" < NOW() - INTERVAL '20 minutes'
-LIMIT 10
+`BackfillTasksCron.reconcileStaleInitialized()` запускається щохвилини:
+- Знаходить треки з `status=INITIALIZED` старші 5 хвилин (threshold: missed Redis enqueue)
+- Re-enqueues через `AudioProcessingQueuePort.enqueue()` — той самий порт що і `CompleteUploadService`
+- Використовує `jobId=trackId` (через `BullMqAudioQueueAdapter`) — concurrent reconciliation + upload-complete → at most one pending job
 
-// Для кожного — перевірити чи є job у Redis (через queue.getJob(trackId))
-// Якщо немає → re-enqueue → no-op якщо вже є через replaceChunks
-```
+**PR review fix (Issue #1):**
+- До виправлення: reconciliation використовував `queue.add()` напряму без `jobId` → дублювання jobs при race
+- Виправлено: використовує `AudioProcessingQueuePort` з `jobId=trackId` — детерміністичний і ідемпотентний
 
 **Чому безпечно при retry/concurrency:**
-- `replaceChunks` (C1 fix) робить re-enqueue ідемпотентним
-- Перевірка status !== INITIALIZED перед enqueue (C1 Phase 1 fix) не дасть `upload-complete` конфліктувати з cron
+- BullMQ `jobId` гарантує at-most-one pending job для одного trackId
+- `replaceChunks` + conditional COMPLETED update роблять processor ідемпотентним при повторному enqueue
 
 ---
 
 ### C4 — Race condition у resolveUserId: два паралельних запити для одного telegramId/deviceId
 
-**Файли:** `telegram-webhook.controller.ts:108–114`, `upload.controller.ts:60–66`, `streaming.gateway.ts:74–79`
-**Статус:** ⚠️ Не виправлено
+**Файли:** `telegram-webhook.controller.ts`, `streaming.gateway.ts`
+**Статус:** ✅ Виправлено
 
 **Failure scenario:**
 ```
@@ -218,8 +209,8 @@ const user = await this.userRepo.findOneByOrFail({ telegramId });
 
 ### C5 — Streaming gateway: balance check відбувається після того як аудіо почало надходити
 
-**Файли:** `streaming.gateway.ts:107–131`
-**Статус:** ⚠️ Не виправлено
+**Файли:** `streaming.gateway.ts`
+**Статус:** ✅ Виправлено (state machine: pending → authorized/rejected)
 
 **Failure scenario:**
 ```
@@ -287,8 +278,8 @@ client.on('message', async (data, isBinary) => {
 
 ### H1 — freeTracksUsed increment відбувається поза транзакцією з основним UPDATE
 
-**Файли:** `audio-processor.processor.ts:90–105`
-**Статус:** ⚠️ Не виправлено
+**Файли:** `audio-processor.processor.ts`
+**Статус:** ✅ Виправлено (atomic transaction)
 
 **Failure scenario:**
 ```
@@ -317,35 +308,30 @@ Worker Step F:
 - Але при реальному billing: подвійне списання = фінансовий збій
 - При retry після DB crash: track може бути COMPLETED, але freeTracksUsed не збільшений
 
-**Proposed solution:**
+**Реалізований механізм (PR review fix, Issue #3):**
 
-Підхід 1 — Wrap в одну транзакцію:
 ```typescript
-await this.trackRepo.manager.transaction(async (tx) => {
-  await tx.query(`UPDATE audio_tracks SET ... WHERE id = $1`, [..., trackId]);
+const isFirstCompletion = await this.trackRepo.manager.transaction(async (tx) => {
+  const rows = await tx.query(
+    `UPDATE audio_tracks SET status=$6 ... WHERE id=$7 AND status != $6 RETURNING "userId"`
+  );
+  if (rows.length === 0) return false;
   await tx.query(
     `UPDATE users SET "freeTracksUsed" = "freeTracksUsed" + 1 WHERE id = $1`,
-    [track.userId]
+    [rows[0].userId],
   );
+  return true;
 });
 ```
 
-Підхід 2 — Перевіряти статус перед обробкою (idempotency guard):
-```typescript
-// На початку handleProcessAudioTrack:
-const track = await this.trackRepo.findOneByOrFail({ id: trackId });
-if (track.status === AudioTrackStatus.COMPLETED) {
-  this.logger.warn(`[${trackId}] already COMPLETED — skipping (idempotency guard)`);
-  return; // job завершується успішно, BullMQ видаляє її
-}
-```
-
-**Рекомендація: обидва підходи разом.** Guard + транзакція для increment.
+- `UPDATE audio_tracks WHERE status != COMPLETED` + `UPDATE users` — в одній транзакції
+- Якщо `status` вже `COMPLETED` → UPDATE не зачіпає рядки → users не оновлюється → обидва committed as no-op
+- Crash між двома UPDATE неможливий — одна транзакція
 
 **Чому безпечно при retry/concurrency:**
-- Transaction гарантує атомарність UPDATE tracks + UPDATE users
-- Guard на початку запобігає подвійній обробці для вже COMPLETED tracks
-- `freeTracksUsed` — simple counter, не може стати від'ємним через guard
+- PostgreSQL row-level lock при UPDATE серіалізує concurrent workers на одному track
+- First completion: обидва UPDATE committed разом або rollback разом
+- Retry: `WHERE status != COMPLETED` повертає 0 рядків → quota не зачіпається
 
 ---
 
@@ -413,8 +399,8 @@ if (updateId) {
 
 ### H3 — OpenAI calls не мають timeout — worker може зависнути назавжди
 
-**Файли:** `openai-transcription.adapter.ts:16–18`, `openai-embedding.adapter.ts:9–13`, `openai-chat-completion.adapter.ts:9–17`, `openai-summarization.adapter.ts:62–68`
-**Статус:** ⚠️ Не виправлено
+**Файли:** `common/services/openai.service.ts`
+**Статус:** ✅ Виправлено (`maxRetries: 0, timeout: 120_000`)
 
 **Failure scenario:**
 ```
@@ -449,12 +435,11 @@ this.client = new OpenAI({
 });
 ```
 
-OpenAI Node SDK підтримує `timeout` та `maxRetries` на рівні клієнта. З `maxRetries: 0` SDK не буде retrying самостійно — це залишається за BullMQ.
+**Реалізований механізм:** `new OpenAI({ maxRetries: 0, timeout: 120_000 })` в `openai.service.ts`. BullMQ — єдиний власник retry logic.
 
 **Чому безпечно при retry/concurrency:**
-- `timeout` викидає `APITimeoutError` → BullMQ ловить → retry з backoff
-- `maxRetries: 0` запобігає double retry (SDK + BullMQ)
-- 120s достатньо для будь-якого розумного аудіо файлу
+- `timeout` викидає `APITimeoutError` → BullMQ ловить → retry з exponential backoff
+- `maxRetries: 0` запобігає compound retry (SDK retry × BullMQ retry = N² calls)
 
 ---
 
