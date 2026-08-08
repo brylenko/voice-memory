@@ -23,6 +23,7 @@ import { AudioChunkRepository } from '../audio-chunk/audio-chunk.repository';
 import { UserEntity } from '../user/user.entity';
 import { chunkTextBySentence, dayOfWeekOf } from '../common/services/text-chunker.util';
 import { EncryptionService } from '../common/services/encryption.service';
+import { WsHmacAuthService, WsAuthError } from './ws-hmac-auth.service';
 
 interface TranscriptDelta   { type: 'transcript'; text: string; }
 interface DoneEvent         { type: 'done'; fullText: string; trackId: string; }
@@ -41,11 +42,14 @@ type ServerEvent = TranscriptDelta | DoneEvent | ErrorEvent;
  *   {"type":"done","fullText":"...","trackId":"..."}— full transcript + saved track id
  *   {"type":"error","message":"..."}                — something went wrong
  *
- * Query params:
- *   deviceId — device serial / Telegram ID (required); treated as untrusted external ID,
- *              resolved to internal UUID via users table (same as X-Device-Serial on HTTP).
- *              NOT a raw UUID — passing a guessed UUID will simply create a new orphan user.
- *   lang      — BCP-47 language hint, e.g. "uk", "en" (optional)
+ * Required query params (HMAC authentication — same scheme as HTTP DeviceAuthGuard):
+ *   deviceId  — device serial number
+ *   ts        — unix seconds (integer)
+ *   nonce     — random unique string per connection (replay protection)
+ *   sig       — hex HMAC-SHA256( `${deviceId}.${ts}.${nonce}`, DEVICE_HMAC_SECRET )
+ *
+ * Optional query params:
+ *   lang      — BCP-47 language hint, e.g. "uk", "en"
  */
 @WebSocketGateway({ path: '/audio/live' })
 export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -69,6 +73,7 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
     private readonly chunkRepo: AudioChunkRepository,
     private readonly config: ConfigService,
     private readonly encryption: EncryptionService,
+    private readonly wsAuth: WsHmacAuthService,
   ) {}
 
   private async resolveUser(externalId: string): Promise<{ id: string; quotaExceeded: boolean }> {
@@ -93,20 +98,22 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   handleConnection(client: WebSocket, req: IncomingMessage) {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
-    // Security note: deviceId is an identifier, not a credential — there is no
-    // cryptographic proof of ownership here (unlike the REST channel's HMAC guard).
-    // Known trade-off: anyone who knows a device serial can stream under its identity.
-    // Acceptable while serials are opaque and non-enumerable; add HMAC in query/first-frame
-    // if WebSocket needs REST-level auth parity.
-    const externalId = url.searchParams.get('deviceId') ?? '';
-    const lang       = url.searchParams.get('lang') ?? undefined;
+    const lang = url.searchParams.get('lang') ?? undefined;
 
-    if (!externalId) {
-      client.close(1008, 'deviceId query param is required');
+    // Validate HMAC credentials before doing anything else.
+    // Uses the same scheme as HTTP DeviceAuthGuard: HMAC-SHA256(deviceId.ts.nonce, secret).
+    // Nonce prevents replay; timestamp window prevents delayed-capture attacks.
+    let externalId: string;
+    try {
+      externalId = this.wsAuth.validate(url.searchParams);
+    } catch (err) {
+      const reason = err instanceof WsAuthError ? err.reason : 'Authentication failed';
+      this.logger.warn(`WS auth rejected: ${reason}`);
+      client.close(1008, reason);
       return;
     }
 
-    this.logger.log(`Client connected (externalId=${externalId})`);
+    this.logger.log(`Client authenticated (deviceId=***${externalId.slice(-4)})`);
 
     const audioPassthrough = new Readable({ read() {} });
     this.sessions.set(client, audioPassthrough);
