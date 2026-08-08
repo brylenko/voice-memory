@@ -99,6 +99,30 @@ describe('WsHmacAuthService', () => {
     });
   });
 
+  describe('strict timestamp validation', () => {
+    it('rejects timestamp with trailing non-digit characters (e.g. "123456abc")', () => {
+      const svc = makeService();
+      const ts = Math.floor(Date.now() / 1000);
+      const params = makeParams({ ts });
+      params.set('ts', `${ts}abc`);
+      expect(() => svc.validate(params)).toThrow(WsAuthError);
+      expect(() => svc.validate(params)).toThrow('Invalid timestamp');
+    });
+
+    it('rejects float timestamp (e.g. "1234567890.5")', () => {
+      const svc = makeService();
+      const params = makeParams();
+      params.set('ts', '1234567890.5');
+      expect(() => svc.validate(params)).toThrow(WsAuthError);
+    });
+
+    it('accepts pure digit timestamp', () => {
+      const svc = makeService();
+      // valid params already uses a pure digit ts — just confirm it passes
+      expect(() => svc.validate(makeParams())).not.toThrow();
+    });
+  });
+
   describe('expired timestamp', () => {
     it('rejects timestamp older than TTL', () => {
       const svc = makeService();

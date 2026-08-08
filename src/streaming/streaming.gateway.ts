@@ -267,20 +267,21 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
       [this.encryption.encrypt(fullText), fullText, tags, eventDate, AudioTrackStatus.COMPLETED, trackId],
     );
 
-    if (textChunks.length > 0) {
-      const vectors = await this.embedding.embed(textChunks);
-      const now = new Date();
-      await this.chunkRepo.replaceChunks(
-        textChunks.map((text, i) => ({
-          trackId,
-          userId,
-          text,
-          embedding: vectors[i],
-          dayOfWeek: dayOfWeekOf(now),
-          createdAt: now,
-        })),
-      );
-    }
+    const chunkInserts = textChunks.length > 0
+      ? await (async () => {
+          const vectors = await this.embedding.embed(textChunks);
+          const now = new Date();
+          return textChunks.map((text, i) => ({
+            trackId,
+            userId,
+            text,
+            embedding: vectors[i],
+            dayOfWeek: dayOfWeekOf(now),
+            createdAt: now,
+          }));
+        })()
+      : [];
+    await this.chunkRepo.replaceChunks(trackId, chunkInserts);
 
     await this.userRepo.increment({ id: userId }, 'freeTracksUsed', 1);
     this.logger.log(`[${trackId}] finalized live transcript (${fullText.length} chars, ${textChunks.length} chunks, tags: ${tags.join(', ')}, eventDate: ${eventDate?.toISOString() ?? 'null'})`);
