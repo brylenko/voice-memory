@@ -106,12 +106,20 @@ export class TelegramWebhookController {
 
   /** Resolve or create the canonical user UUID for a given Telegram user ID. */
   private async resolveUserId(telegramId: string): Promise<string> {
-    let user = await this.userRepo.findOneBy({ telegramId });
-    if (!user) {
-      user = await this.userRepo.save(this.userRepo.create({ telegramId }));
-      this.logger.log(`[tg=${telegramId}] created new user row: ${user.id}`);
+    // Atomic upsert prevents race condition when two concurrent webhook deliveries
+    // arrive for the same new user. INSERT ... ON CONFLICT guarantees at-most-one row.
+    const rows: Array<{ id: string }> = await this.userRepo.manager.query(
+      `INSERT INTO users ("telegramId") VALUES ($1)
+       ON CONFLICT ("telegramId") DO NOTHING
+       RETURNING id`,
+      [telegramId],
+    );
+    if (rows.length > 0) {
+      this.logger.log(`[tg=${telegramId}] created new user row: ${rows[0].id}`);
+      return rows[0].id;
     }
-    return user.id;
+    const existing = await this.userRepo.findOneByOrFail({ telegramId });
+    return existing.id;
   }
 
   private async handleSearchQuery(chatId: number, userId: string, query: string, replyToMessageId: number): Promise<void> {

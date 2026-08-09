@@ -2,10 +2,10 @@
  * Re-queues all FAILED audio tracks for reprocessing.
  *
  * Usage:
- *   docker exec plaud-backend-app-1 node dist/scripts/retry-failed-tracks.js
+ *   docker exec voice-memory-app-1 node dist/scripts/retry-failed-tracks.js
  *
  * Or for a specific user (pass the UUID from the users table):
- *   docker exec plaud-backend-app-1 node dist/scripts/retry-failed-tracks.js --userId=<uuid>
+ *   docker exec voice-memory-app-1 node dist/scripts/retry-failed-tracks.js --userId=<uuid>
  */
 
 import 'reflect-metadata';

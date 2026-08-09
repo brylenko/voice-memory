@@ -12,7 +12,8 @@ import {
   AUDIO_PROCESSING_QUEUE_PORT,
   AudioProcessingQueuePort,
 } from './ports/outbound/audio-processing-queue.port';
-import { TrackNotFoundError } from './errors';
+import { TrackAlreadyProcessingError, TrackNotFoundError, TrackOwnershipError } from './errors';
+import { AudioTrackStatus } from '../../audio-track/audio-track.entity';
 
 @Injectable()
 export class CompleteUploadService implements CompleteUploadUseCase {
@@ -25,6 +26,18 @@ export class CompleteUploadService implements CompleteUploadUseCase {
     const track = await this.trackWriter.findById(command.trackId);
     if (!track) {
       throw new TrackNotFoundError(command.trackId);
+    }
+
+    if (track.userId !== command.userId) {
+      throw new TrackOwnershipError(command.trackId);
+    }
+
+    // Guard against duplicate upload-complete calls (device retry, network replay).
+    // PROCESSING/COMPLETED/FAILED tracks already have a job in flight or are done —
+    // silently return current status so the device gets a valid response without
+    // creating a second job that would produce duplicate embeddings.
+    if (track.status !== AudioTrackStatus.INITIALIZED) {
+      throw new TrackAlreadyProcessingError(command.trackId, track.status);
     }
 
     await this.queue.enqueue({

@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { UserEntity } from '../../../../user/user.entity';
 import { AudioTrackEntity } from '../../../../audio-track/audio-track.entity';
 import { GoogleCalendarService, CalendarEvent } from '../../../../google/google-calendar.service';
+import { OAuthStateStore } from '../../../../google/oauth-state.store';
 import { TelegramApiClient } from './telegram-api.client';
 
 // callback_data payload format (all ≤64 bytes):
@@ -30,6 +31,7 @@ export class CalendarCallbackService {
     @InjectRepository(UserEntity) private readonly userRepo: Repository<UserEntity>,
     @InjectRepository(AudioTrackEntity) private readonly trackRepo: Repository<AudioTrackEntity>,
     private readonly calendar: GoogleCalendarService,
+    private readonly oauthState: OAuthStateStore,
     private readonly telegram: TelegramApiClient,
   ) {}
 
@@ -68,7 +70,8 @@ export class CalendarCallbackService {
 
   private async handleConnect(callbackQueryId: string, userId: string, chatId: number): Promise<void> {
     await this.telegram.answerCallbackQuery(callbackQueryId);
-    const url = this.calendar.buildAuthUrl(userId);
+    const state = this.oauthState.generate(userId);
+    const url = this.calendar.buildAuthUrl(state);
     await this.telegram.sendMessage(
       chatId,
       `🔗 Connect Google Calendar via this link:\n${url}`,

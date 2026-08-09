@@ -29,10 +29,27 @@ export interface SimilaritySearchResult {
 export class AudioChunkRepository {
   constructor(private readonly dataSource: DataSource) {}
 
-  async insertMany(chunks: InsertChunkInput[]): Promise<void> {
-    if (chunks.length === 0) return;
-
+  /**
+   * Atomically replaces all chunks for a track.
+   *
+   * trackId is explicit so the DELETE runs even when chunks is empty —
+   * a retry that produces zero embeddings must not leave stale rows behind.
+   *
+   * Concurrent correctness: pg_advisory_xact_lock serialises concurrent workers
+   * on the same trackId. The lock is scoped to the transaction and released
+   * automatically on commit/rollback — no manual unlock needed.
+   */
+  async replaceChunks(trackId: string, chunks: InsertChunkInput[]): Promise<void> {
     await this.dataSource.transaction(async (manager) => {
+      // Advisory lock keyed on trackId hash — serialises concurrent workers for
+      // the same track without blocking unrelated tracks.
+      await manager.query(
+        `SELECT pg_advisory_xact_lock(hashtext($1))`,
+        [trackId],
+      );
+
+      await manager.query(`DELETE FROM audio_chunks WHERE "trackId" = $1`, [trackId]);
+
       for (const chunk of chunks) {
         await manager.query(
           `INSERT INTO audio_chunks
@@ -49,6 +66,12 @@ export class AudioChunkRepository {
         );
       }
     });
+  }
+
+  /** @deprecated Use replaceChunks(trackId, chunks) for idempotent upsert. */
+  async insertMany(chunks: InsertChunkInput[]): Promise<void> {
+    if (chunks.length === 0) return;
+    return this.replaceChunks(chunks[0].trackId, chunks);
   }
 
   /**

@@ -23,6 +23,7 @@ import { AudioChunkRepository } from '../audio-chunk/audio-chunk.repository';
 import { UserEntity } from '../user/user.entity';
 import { chunkTextBySentence, dayOfWeekOf } from '../common/services/text-chunker.util';
 import { EncryptionService } from '../common/services/encryption.service';
+import { WsHmacAuthService, WsAuthError } from './ws-hmac-auth.service';
 
 interface TranscriptDelta   { type: 'transcript'; text: string; }
 interface DoneEvent         { type: 'done'; fullText: string; trackId: string; }
@@ -41,11 +42,14 @@ type ServerEvent = TranscriptDelta | DoneEvent | ErrorEvent;
  *   {"type":"done","fullText":"...","trackId":"..."}— full transcript + saved track id
  *   {"type":"error","message":"..."}                — something went wrong
  *
- * Query params:
- *   deviceId — device serial / Telegram ID (required); treated as untrusted external ID,
- *              resolved to internal UUID via users table (same as X-Device-Serial on HTTP).
- *              NOT a raw UUID — passing a guessed UUID will simply create a new orphan user.
- *   lang      — BCP-47 language hint, e.g. "uk", "en" (optional)
+ * Required query params (HMAC authentication — same scheme as HTTP DeviceAuthGuard):
+ *   deviceId  — device serial number
+ *   ts        — unix seconds (integer)
+ *   nonce     — random unique string per connection (replay protection)
+ *   sig       — hex HMAC-SHA256( `${deviceId}.${ts}.${nonce}`, DEVICE_HMAC_SECRET )
+ *
+ * Optional query params:
+ *   lang      — BCP-47 language hint, e.g. "uk", "en"
  */
 @WebSocketGateway({ path: '/audio/live' })
 export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -69,13 +73,23 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
     private readonly chunkRepo: AudioChunkRepository,
     private readonly config: ConfigService,
     private readonly encryption: EncryptionService,
+    private readonly wsAuth: WsHmacAuthService,
   ) {}
 
   private async resolveUser(externalId: string): Promise<{ id: string; quotaExceeded: boolean }> {
-    let user = await this.userRepo.findOneBy({ deviceId: externalId });
-    if (!user) {
-      user = await this.userRepo.save(this.userRepo.create({ deviceId: externalId }));
-      this.logger.log(`Created new user for deviceId=${externalId}: ${user.id}`);
+    // Atomic upsert prevents UNIQUE violation under concurrent connections from the same device.
+    const rows: Array<{ id: string }> = await this.userRepo.manager.query(
+      `INSERT INTO users ("deviceId") VALUES ($1)
+       ON CONFLICT ("deviceId") DO NOTHING
+       RETURNING id`,
+      [externalId],
+    );
+    let user: { id: string; freeTracksUsed: number };
+    if (rows.length > 0) {
+      this.logger.log(`Created new user for deviceId=${externalId}: ${rows[0].id}`);
+      user = { id: rows[0].id, freeTracksUsed: 0 };
+    } else {
+      user = (await this.userRepo.findOneByOrFail({ deviceId: externalId })) as { id: string; freeTracksUsed: number };
     }
     const limit = this.config.get<number>('payment.freeTracksLimit') ?? 10;
     const quotaExceeded = limit > 0 && user.freeTracksUsed >= limit;
@@ -84,43 +98,70 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   handleConnection(client: WebSocket, req: IncomingMessage) {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
-    // Security note: deviceId is an identifier, not a credential — there is no
-    // cryptographic proof of ownership here (unlike the REST channel's HMAC guard).
-    // Known trade-off: anyone who knows a device serial can stream under its identity.
-    // Acceptable while serials are opaque and non-enumerable; add HMAC in query/first-frame
-    // if WebSocket needs REST-level auth parity.
-    const externalId = url.searchParams.get('deviceId') ?? '';
-    const lang       = url.searchParams.get('lang') ?? undefined;
+    const lang = url.searchParams.get('lang') ?? undefined;
 
-    if (!externalId) {
-      client.close(1008, 'deviceId query param is required');
+    // Validate HMAC credentials before doing anything else.
+    // Uses the same scheme as HTTP DeviceAuthGuard: HMAC-SHA256(deviceId.ts.nonce, secret).
+    // Nonce prevents replay; timestamp window prevents delayed-capture attacks.
+    let externalId: string;
+    try {
+      externalId = this.wsAuth.validate(url.searchParams);
+    } catch (err) {
+      const reason = err instanceof WsAuthError ? err.reason : 'Authentication failed';
+      this.logger.warn(`WS auth rejected: ${reason}`);
+      client.close(1008, reason);
       return;
     }
 
-    this.logger.log(`Client connected (externalId=${externalId})`);
+    this.logger.log(`Client authenticated (deviceId=***${externalId.slice(-4)})`);
 
     const audioPassthrough = new Readable({ read() {} });
     this.sessions.set(client, audioPassthrough);
-    let audioStarted = false;
     const deltas: string[] = [];
+
+    // Authorization state machine: buffer incoming audio frames until resolveUser
+    // completes. This guarantees no audio is pushed to OpenAI before auth succeeds.
+    type AuthState = 'pending' | 'authorized' | 'rejected';
+    let authState: AuthState = 'pending';
+    const pendingFrames: Buffer[] = [];
 
     client.on('message', (data, isBinary) => {
       if (isBinary) {
-        if (!audioStarted) {
-          audioStarted = true;
-          void this.resolveUser(externalId).then(({ id: userId, quotaExceeded }) => {
-            if (quotaExceeded && this.config.get<boolean>('payment.required')) {
-              this.send(client, {
-                type: 'error',
-                message: 'Free quota exceeded. Please upgrade to continue.',
-                paymentUrl: this.config.get<string>('payment.url'),
-              });
+        if (authState === 'rejected') return;
+
+        if (authState === 'pending') {
+          pendingFrames.push(data as Buffer);
+          if (pendingFrames.length === 1) {
+            // First frame — kick off auth once; subsequent frames just buffer.
+            void this.resolveUser(externalId).then(({ id: userId, quotaExceeded }) => {
+              if (quotaExceeded && this.config.get<boolean>('payment.required')) {
+                authState = 'rejected';
+                pendingFrames.length = 0;
+                this.send(client, {
+                  type: 'error',
+                  message: 'Free quota exceeded. Please upgrade to continue.',
+                  paymentUrl: this.config.get<string>('payment.url'),
+                });
+                client.close();
+                return;
+              }
+              // Auth succeeded — flush buffered frames then start session.
+              authState = 'authorized';
+              for (const frame of pendingFrames) audioPassthrough.push(frame);
+              pendingFrames.length = 0;
+              void this.runSession(client, audioPassthrough, deltas, userId, lang);
+            }).catch((err: Error) => {
+              authState = 'rejected';
+              pendingFrames.length = 0;
+              this.logger.error(`resolveUser failed: ${err.message}`);
+              this.send(client, { type: 'error', message: 'Authorization failed' });
               client.close();
-              return;
-            }
-            void this.runSession(client, audioPassthrough, deltas, userId, lang);
-          });
+            });
+          }
+          return;
         }
+
+        // authState === 'authorized'
         audioPassthrough.push(data as Buffer);
         return;
       }
@@ -180,7 +221,9 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
         if (unflushedChars >= FLUSH_EVERY) {
           unflushedChars = 0;
-          void flushText(deltas.join(''));
+          flushText(deltas.join('')).catch((err: Error) =>
+            this.logger.error(`[${track.id}] partial text flush failed: ${err.message}`),
+          );
         }
       }
 
@@ -217,29 +260,45 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
     ]);
     const { tags, eventDate } = summarizeResult;
 
-    await this.trackRepo.manager.query(
-      `UPDATE audio_tracks
-       SET "fullText" = $1, "searchVector" = to_tsvector('simple', $2), tags = $3, "eventDate" = $4, "tagsProcessed" = TRUE, status = $5
-       WHERE id = $6`,
-      [this.encryption.encrypt(fullText), fullText, tags, eventDate, AudioTrackStatus.COMPLETED, trackId],
-    );
-
-    if (textChunks.length > 0) {
-      const vectors = await this.embedding.embed(textChunks);
-      const now = new Date();
-      await this.chunkRepo.insertMany(
-        textChunks.map((text, i) => ({
-          trackId,
-          userId,
-          text,
-          embedding: vectors[i],
-          dayOfWeek: dayOfWeekOf(now),
-          createdAt: now,
-        })),
+    // Atomic: status transition + quota increment in one transaction.
+    // WHERE status != COMPLETED makes this idempotent under retry/concurrent finalize.
+    const isFirstCompletion = await this.trackRepo.manager.transaction(async (tx) => {
+      const rows: Array<{ userId: string }> = await tx.query(
+        `UPDATE audio_tracks
+         SET "fullText" = $1, "searchVector" = to_tsvector('simple', $2),
+             tags = $3, "eventDate" = $4, "tagsProcessed" = TRUE, status = $5
+         WHERE id = $6 AND status != $5
+         RETURNING "userId"`,
+        [this.encryption.encrypt(fullText), fullText, tags, eventDate, AudioTrackStatus.COMPLETED, trackId],
       );
+      if (rows.length === 0) return false;
+      await tx.query(
+        `UPDATE users SET "freeTracksUsed" = "freeTracksUsed" + 1 WHERE id = $1`,
+        [rows[0].userId],
+      );
+      return true;
+    });
+
+    if (!isFirstCompletion) {
+      this.logger.warn(`[${trackId}] finalize: track already COMPLETED — skipping chunks and quota`);
+      return trackId;
     }
 
-    await this.userRepo.increment({ id: userId }, 'freeTracksUsed', 1);
+    const chunkInserts = textChunks.length > 0
+      ? await (async () => {
+          const vectors = await this.embedding.embed(textChunks);
+          const now = new Date();
+          return textChunks.map((text, i) => ({
+            trackId,
+            userId,
+            text,
+            embedding: vectors[i],
+            dayOfWeek: dayOfWeekOf(now),
+            createdAt: now,
+          }));
+        })()
+      : [];
+    await this.chunkRepo.replaceChunks(trackId, chunkInserts);
     this.logger.log(`[${trackId}] finalized live transcript (${fullText.length} chars, ${textChunks.length} chunks, tags: ${tags.join(', ')}, eventDate: ${eventDate?.toISOString() ?? 'null'})`);
     return trackId;
   }

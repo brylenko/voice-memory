@@ -2,7 +2,7 @@
  * Backfill structured tasks for COMPLETED tracks that pre-date the tasks feature.
  *
  * Usage:
- *   docker exec plaud-backend-app-1 node dist/scripts/backfill-tasks.js
+ *   docker exec voice-memory-app-1 node dist/scripts/backfill-tasks.js
  */
 
 import 'reflect-metadata';

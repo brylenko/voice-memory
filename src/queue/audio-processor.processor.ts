@@ -38,7 +38,7 @@ export class AudioProcessorProcessor {
     private readonly encryption: EncryptionService,
   ) {}
 
-  @Process({ name: 'process-audio-track', concurrency: 20 })
+  @Process({ name: 'process-audio-track', concurrency: 5 })
   async handleProcessAudioTrack(job: Job<AudioProcessingJob>): Promise<void> {
     const { trackId, storageKey, userId } = job.data;
 
@@ -84,22 +84,42 @@ export class AudioProcessorProcessor {
       const { summaries, tags, eventDate } = result;
       this.logger.log(`[${trackId}] C+D: done in ${Date.now() - t2}ms — tags: ${tags.join(', ')} | eventDate: ${eventDate?.toISOString() ?? 'null'}`);
 
-      // --- Step F: save results + full-text search vector ---
+      // --- Step F: save results + atomically increment quota ---
+      // Both the status transition and the freeTracksUsed increment happen inside
+      // one transaction so a crash between them can't leave the counter un-incremented.
+      // The WHERE status != COMPLETED guard makes the whole block idempotent:
+      //   - first completion  → UPDATE matches, quota incremented, both committed
+      //   - retry/concurrent  → UPDATE matches 0 rows, quota skipped, both no-op
       const encryptedFullText = this.encryption.encrypt(fullText);
       const encryptedSummaries = this.encryption.encryptJson(summaries);
-      await this.trackRepo.manager.query(
-        `UPDATE audio_tracks
-         SET summaries = $1, tags = $2, "fullText" = $3,
-             "searchVector" = to_tsvector('simple', $4),
-             "eventDate" = $5,
-             "tagsProcessed" = TRUE,
-             status = $6
-         WHERE id = $7`,
-        [encryptedSummaries, tags, encryptedFullText, fullText, eventDate, AudioTrackStatus.COMPLETED, trackId],
-      );
-      this.logger.log(`[${trackId}] F: saved summaries + tags + full-text index, status=COMPLETED`);
 
-      await this.userRepo.increment({ id: track.userId }, 'freeTracksUsed', 1);
+      const isFirstCompletion = await this.trackRepo.manager.transaction(async (tx) => {
+        const rows: Array<{ userId: string }> = await tx.query(
+          `UPDATE audio_tracks
+           SET summaries = $1, tags = $2, "fullText" = $3,
+               "searchVector" = to_tsvector('simple', $4),
+               "eventDate" = $5,
+               "tagsProcessed" = TRUE,
+               status = $6
+           WHERE id = $7 AND status != $6
+           RETURNING "userId"`,
+          [encryptedSummaries, tags, encryptedFullText, fullText, eventDate, AudioTrackStatus.COMPLETED, trackId],
+        );
+        if (rows.length === 0) return false;
+
+        await tx.query(
+          `UPDATE users SET "freeTracksUsed" = "freeTracksUsed" + 1 WHERE id = $1`,
+          [rows[0].userId],
+        );
+        return true;
+      });
+
+      this.logger.log(`[${trackId}] F: saved summaries + tags + full-text index, status=COMPLETED (firstCompletion=${isFirstCompletion})`);
+
+      if (!isFirstCompletion) {
+        this.logger.warn(`[${trackId}] F: skipping post-completion steps — track was already COMPLETED`);
+        return;
+      }
 
       const consumedMinutes = Math.ceil(track.duration / 60);
       await this.balance.consumeMinutes(track.userId, consumedMinutes);
@@ -146,21 +166,25 @@ export class AudioProcessorProcessor {
 
   private async embedAndStoreChunks(trackId: string, userId: string, fullText: string): Promise<void> {
     const textChunks = chunkTextBySentence(fullText, 800);
-    if (textChunks.length === 0) return;
 
-    const vectors = await this.embedding.embed(textChunks);
+    const inserts = textChunks.length > 0
+      ? await (async () => {
+          const vectors = await this.embedding.embed(textChunks);
+          const now = new Date();
+          return textChunks.map((text, index) => ({
+            trackId,
+            userId,
+            text,
+            embedding: vectors[index],
+            dayOfWeek: dayOfWeekOf(now),
+            createdAt: now,
+          }));
+        })()
+      : [];
 
-    const now = new Date();
-    const inserts = textChunks.map((text, index) => ({
-      trackId,
-      userId,
-      text,
-      embedding: vectors[index],
-      dayOfWeek: dayOfWeekOf(now),
-      createdAt: now,
-    }));
-
-    await this.chunkRepo.insertMany(inserts);
+    // Always call replaceChunks — even with empty inserts — so stale chunks
+    // from a previous attempt are deleted when STT/embedding returns nothing.
+    await this.chunkRepo.replaceChunks(trackId, inserts);
   }
 }
 

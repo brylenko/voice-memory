@@ -1,4 +1,4 @@
-# Plaud-style AI Voice Recorder — Backend
+# Voice Memory — Backend
 
 > ## ⚠️ IMPORTANT — read before deploying with `STORAGE_DRIVER=s3`
 >
@@ -98,7 +98,7 @@ RAG index over meeting history, and answers natural-language questions like
 
 ## Features
 
-_(Inspired by [Plaud](https://eu.plaud.ai/) and its backend capabilities.)_
+_(Inspired by AI voice assistant concepts and meeting intelligence tools.)_
 
 - **Voice as search** — say a question, get an instant RAG answer from your recording archive
 - **Auto-detected summaries** — meeting / interview / lecture / sales call / custom templates, chosen from the transcript

@@ -1,5 +1,5 @@
 {
-  "name": "plaud-backend",
+  "name": "voice-memory",
   "version": "0.1.1-beta",
   "description": "AI voice-recorder backend (STT + RAG over meetings) - NestJS/TypeScript/ESM",
   "license": "UNLICENSED",

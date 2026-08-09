@@ -15,6 +15,11 @@ export class OpenAiService {
   constructor(private readonly config: ConfigService) {
     this.client = new OpenAI({
       apiKey: this.config.get<string>('openaiApiKey'),
+      // BullMQ owns retries with exponential backoff — let OpenAI SDK throw
+      // immediately on any error so BullMQ can apply its retry policy.
+      // timeout: 120s covers the longest expected STT call (~10 min audio).
+      maxRetries: 0,
+      timeout: 120_000,
     });
   }
 }

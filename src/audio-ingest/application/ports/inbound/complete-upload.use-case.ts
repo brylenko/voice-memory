@@ -1,5 +1,7 @@
 export interface CompleteUploadCommand {
   trackId: string;
+  /** The authenticated user requesting completion — must match track.userId. */
+  userId: string;
 }
 
 export interface CompleteUploadResult {
