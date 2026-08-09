@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { AudioTrackEntity, AudioTrackStatus, TrackSummaries } from '../audio-track/audio-track.entity';
@@ -12,7 +13,12 @@ import {
   AUDIO_PROCESSING_QUEUE_PORT,
   AudioProcessingQueuePort,
 } from '../audio-ingest/application/ports/outbound/audio-processing-queue.port';
+import {
+  AUDIO_STORAGE_PORT,
+  AudioStoragePort,
+} from '../audio-ingest/application/ports/outbound/audio-storage.port';
 
+// C3: re-enqueue tracks whose Redis job was lost (DB ok, queue empty).
 const STALE_INITIALIZED_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
 
 const TASKS_PROMPT =
@@ -33,15 +39,16 @@ export class BackfillTasksCron {
     @Inject(SUMMARIZATION_PORT) private readonly summarization: SummarizationPort,
     private readonly encryption: EncryptionService,
     @Inject(AUDIO_PROCESSING_QUEUE_PORT) private readonly processingQueue: AudioProcessingQueuePort,
+    @Inject(AUDIO_STORAGE_PORT) private readonly storage: AudioStoragePort,
+    private readonly config: ConfigService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
   async run(): Promise<void> {
-    // Reconcile stale INITIALIZED tracks before acquiring the processing lock.
-    // Tracks stuck in INITIALIZED longer than the threshold indicate a DB-commit-success
-    // + Redis-enqueue-failure scenario. Re-enqueueing is safe: replaceChunks and the
-    // conditional COMPLETED update make the processor idempotent on retry.
+    // C3: tracks > 5 min INITIALIZED → queue job was probably lost → re-enqueue.
     await this.reconcileStaleInitialized();
+    // C2: tracks > 30 min INITIALIZED → client probably abandoned the upload → check S3.
+    await this.reconcileAbandonedUploads();
 
     if (this.running) return;
 
@@ -109,6 +116,58 @@ export class BackfillTasksCron {
       }
     } finally {
       this.running = false;
+    }
+  }
+
+  /**
+   * C2 fix: find INITIALIZED tracks older than the abandonment threshold and
+   * verify that the corresponding storage object actually exists.
+   *
+   * Three outcomes:
+   *   exists      → leave INITIALIZED; the C3 re-enqueue reconciler will handle it.
+   *   missing     → conditional UPDATE to FAILED (WHERE status = INITIALIZED so a
+   *                 racing worker that already moved to PROCESSING is never touched).
+   *   S3 error    → log and skip; try again next cron tick. Do not mark FAILED on
+   *                 transient infrastructure failures.
+   */
+  private async reconcileAbandonedUploads(): Promise<void> {
+    const thresholdMinutes = this.config.get<number>('staleUploadThresholdMinutes') ?? 30;
+    const abandonThreshold = new Date(Date.now() - thresholdMinutes * 60 * 1000);
+
+    const candidates = await this.trackRepo
+      .createQueryBuilder('t')
+      .where('t.status = :status', { status: AudioTrackStatus.INITIALIZED })
+      .andWhere('t."createdAt" < :threshold', { threshold: abandonThreshold })
+      .limit(20)
+      .getMany();
+
+    if (candidates.length === 0) return;
+    this.logger.log(`C2 reconciler: ${candidates.length} candidate(s) older than ${thresholdMinutes} min`);
+
+    for (const track of candidates) {
+      try {
+        const objectExists = await this.storage.exists(track.fileUrl);
+        if (objectExists) {
+          this.logger.log(`C2 reconciler: track ${track.id} — object exists, leaving INITIALIZED`);
+          continue;
+        }
+
+        // Object is definitely absent — mark FAILED using conditional UPDATE so
+        // a concurrent status change (INITIALIZED → PROCESSING) is never overwritten.
+        const result = await this.trackRepo.manager.query(
+          `UPDATE audio_tracks SET status = $1 WHERE id = $2 AND status = $3`,
+          [AudioTrackStatus.FAILED, track.id, AudioTrackStatus.INITIALIZED],
+        );
+        const affected = Array.isArray(result) ? (result[1] as number) : 0;
+        if (affected > 0) {
+          this.logger.warn(`C2 reconciler: track ${track.id} marked FAILED — S3 object missing`);
+        } else {
+          this.logger.log(`C2 reconciler: track ${track.id} — status changed concurrently, skipping`);
+        }
+      } catch (err) {
+        // Transient storage error (timeout, 5xx, auth) — do not change business state.
+        this.logger.warn(`C2 reconciler: track ${track.id} — storage check failed, will retry: ${(err as Error).message}`);
+      }
     }
   }
 

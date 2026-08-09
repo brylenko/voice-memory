@@ -39,8 +39,24 @@ _Дата: 2026-08-07 | Ревізор: Senior Backend Engineer | Статус: 
 
 ### C2 — S3 presigned upload URL: storageKey записується в DB до того як байти реально завантажені
 
-**Файли:** `request-upload.service.ts:36–44`, `s3-audio-storage.adapter.ts:74–98`, `complete-upload.service.ts:30`
-**Статус:** ⚠️ Не виправлено, потребує аналізу
+**Файли:** `request-upload.service.ts:36–44`, `s3-audio-storage.adapter.ts:74–98`, `complete-upload.service.ts:30`, `backfill-tasks.cron.ts`, `audio-storage.port.ts`
+**Статус:** ✅ Виправлено (reconciliation mechanism)
+
+**Реалізований механізм:**
+
+`BackfillTasksCron.reconcileAbandonedUploads()` запускається щохвилини:
+1. Знаходить треки з `status=INITIALIZED` старші `STALE_UPLOAD_THRESHOLD_MINUTES` (default: 30 хв)
+2. Для кожного викликає `AudioStoragePort.exists(storageKey)` — HeadObject у S3, stat() на диску
+3. Об'єкт відсутній → `UPDATE audio_tracks SET status='FAILED' WHERE id=? AND status='INITIALIZED'` — conditional update запобігає overwrite якщо worker вже почав processing
+4. Об'єкт існує → не чіпати, C3 reconciler (5 хв) вже відповідає за re-enqueue
+5. Transient storage error (timeout, 5xx) → log WARN, спробувати на наступному cron tick; не міняти статус
+
+**Чому безпечно при race:**
+- `WHERE status = 'INITIALIZED'` — якщо worker вже перевів трек у PROCESSING, UPDATE зачіпає 0 рядків
+- `AudioStoragePort.exists()` — HeadObject, не GetObject; не завантажує байти
+- DB і S3 залишаються окремими системами — рішення є reconciliation, а не distributed transaction
+
+**Важливо:** Це не гарантує DB+S3 transactional consistency. Stale INITIALIZED tracks reconciled шляхом перевірки S3 object existence після abandonment threshold. Missing objects transitioned to FAILED за допомогою conditional DB update. Transient storage failures не змінюють business state.
 
 **Failure scenario:**
 ```
@@ -689,7 +705,7 @@ userId завжди передається з authenticated context (device seri
 | # | Priority | Проблема | Failure Scenario | Impact | Складність фіксу |
 |---|----------|---------|-----------------|--------|-----------------|
 | C1 | ~~Critical~~ | Duplicate chunks при retry | Job retry → duplicate embeddings у RAG | RAG corruption | ✅ Виправлено |
-| C2 | Critical | S3 orphaned objects при INITIALIZED без файлу | Device не заливає файл → worker fail × 5 | Stuck tracks, waste | Low |
+| C2 | ~~Critical~~ | S3 orphaned objects при INITIALIZED без файлу | Device не заливає файл → worker fail × 5 | Stuck tracks, waste | ✅ Виправлено |
 | C3 | Critical | DB→Queue gap: INITIALIZED track без job | Redis недоступний → трек застряє назавжди | Data loss | Low |
 | C4 | Critical | Race condition в resolveUserId | Паралельні webhooks → UNIQUE violation → 500 | Service crash | Low |
 | C5 | Critical | Quota check після початку streaming | Quota exceeded але OpenAI billing вже йде | Фінансові витрати | Low |

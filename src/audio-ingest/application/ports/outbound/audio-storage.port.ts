@@ -32,6 +32,13 @@ export interface AudioStoragePort {
    * process's memory and avoids paying our own egress for the upload).
    */
   createUploadUrl(suggestedName: string, userId: string): Promise<PresignedUpload>;
+
+  /**
+   * Returns true if the object exists in storage (HeadObject / stat), false if missing.
+   * Throws on transient infrastructure errors (timeout, 5xx, auth) so callers can
+   * distinguish "definitely absent" from "couldn't check right now".
+   */
+  exists(storageKey: string): Promise<boolean>;
 }
 
 export const AUDIO_STORAGE_PORT = Symbol('AUDIO_STORAGE_PORT');

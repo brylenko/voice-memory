@@ -29,6 +29,7 @@ function makeService(overrides: {
   const storage: jest.Mocked<AudioStoragePort> = {
     save: jest.fn().mockResolvedValue({ storageKey: STORAGE_KEY, publicUrl: 'https://cdn/voice.ogg' }),
     createUploadUrl: jest.fn(),
+    exists: jest.fn().mockResolvedValue(true),
   };
 
   const trackWriter: jest.Mocked<AudioTrackWriterPort> = {

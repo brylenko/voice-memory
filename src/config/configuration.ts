@@ -35,6 +35,10 @@ export default () => ({
   // 'local' (default, good for dev/demo) or 's3' (production: unlimited scale,
   // no files piling up on the app server's disk).
   storageDriver: process.env.STORAGE_DRIVER ?? 'local',
+  // How long an INITIALIZED track must be stale before we check whether the
+  // S3 object actually exists. Must be longer than the presigned upload TTL
+  // (default 900s / 15min) to avoid false-positives during slow uploads.
+  staleUploadThresholdMinutes: parseInt(process.env.STALE_UPLOAD_THRESHOLD_MINUTES ?? '30', 10),
   billingDriver: process.env.BILLING_DRIVER ?? 'mock',
   payment: {
     required: process.env.PAYMENT_REQUIRED === 'true',

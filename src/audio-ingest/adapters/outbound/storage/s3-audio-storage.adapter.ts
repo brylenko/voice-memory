@@ -1,6 +1,6 @@
 import { Inject, Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PutObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { PutObjectCommand, GetObjectCommand, HeadObjectCommand, NotFound, S3Client, S3ServiceException } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
@@ -71,6 +71,23 @@ export class S3AudioStorageAdapter implements AudioStoragePort {
    * in memory/CPU/egress. We still generate the key server-side so we control
    * the namespace (`recordings/...`) and know it up front for the DB row.
    */
+  async exists(storageKey: string): Promise<boolean> {
+    const bucket = this.config.get<string>('s3.bucket');
+    if (!bucket) {
+      throw new InternalServerErrorException('S3_BUCKET_NAME is not configured');
+    }
+    try {
+      await this.s3.send(new HeadObjectCommand({ Bucket: bucket, Key: storageKey }));
+      return true;
+    } catch (err) {
+      if (err instanceof NotFound) return false;
+      // S3ServiceException covers 403, 5xx, etc. — re-throw so cron treats it
+      // as a transient failure and does not mark the track FAILED.
+      if (err instanceof S3ServiceException) throw err;
+      throw err;
+    }
+  }
+
   async createUploadUrl(suggestedName: string, userId: string): Promise<PresignedUpload> {
     const bucket = this.config.get<string>('s3.bucket');
     if (!bucket) {

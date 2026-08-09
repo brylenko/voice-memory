@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { extname, join } from 'path';
-import { mkdir, writeFile } from 'fs/promises';
+import { access, mkdir, writeFile } from 'fs/promises';
 import {
   AudioStoragePort,
   PresignedUpload,
@@ -43,6 +43,15 @@ export class LocalDiskStorageAdapter implements AudioStoragePort {
    * server" benefit, which is expected — that benefit only matters in prod
    * where STORAGE_DRIVER=s3 anyway.
    */
+  async exists(storageKey: string): Promise<boolean> {
+    try {
+      await access(storageKey);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async createUploadUrl(suggestedName: string, userId: string): Promise<PresignedUpload> {
     const uploadDir = this.config.get<string>('uploadDir') ?? './uploads';
     const userDir = join(uploadDir, userId);
