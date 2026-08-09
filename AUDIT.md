@@ -1,5 +1,5 @@
 # Production Audit — voice-memory
-_Дата: 2026-08-07 | Ревізор: Senior Backend Engineer | Статус: Phase 1 + 2 + 3 Complete_
+_Дата: 2026-08-07 | Ревізор: Senior Backend Engineer | Статус: Phase 1 + 2 + 3 Complete. C2 (S3 orphaned tracks) та інші explicitly documented risks залишаються._
 
 ---
 
@@ -734,7 +734,7 @@ Device channel (two-phase):
 Worker retry gap:
   UPDATE audio_tracks COMPLETED → ok
   freeTracksUsed.increment → crash → H1
-  →retry: COMPLETED guard зупиняє (потрібно додати guard)
+  →retry: WHERE status != COMPLETED guard зупиняє — обидва no-op ✅
 ```
 
 ## S3 → DB CONSISTENCY
@@ -770,8 +770,8 @@ RequestUploadService (Device):
 | `upload-complete` retry | ✅ | Phase 1 fix: status guard | Виправлено |
 | `embedAndStoreChunks` | ✅ | Phase 1 fix: replaceChunks | Виправлено |
 | `summarize()` | ✅ | Result overwritten у DB | OK |
-| `freeTracksUsed.increment` | ❌ | Double increment при retry | H1 fix потрібен |
-| `resolveUserId` | ❌ | UNIQUE violation при concurrency | C4 fix потрібен |
+| `freeTracksUsed.increment` | ✅ | Atomic з UPDATE audio_tracks в одній tx | H1 виправлено |
+| `resolveUserId` | ✅ | INSERT ON CONFLICT DO NOTHING | C4 виправлено |
 | `UPDATE status=COMPLETED` | ✅ | UPDATE idempotent | OK |
 | BullMQ job ACK | ✅ | BullMQ гарантує at-least-once | OK |
 | OpenAI transcription | ✅ | Нова відповідь — той самий результат | OK |
