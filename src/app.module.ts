@@ -1,8 +1,9 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bull';
+import { createTraceMiddleware } from 'loopwarden/nestjs';
 import configuration from './config/configuration';
 import { AudioTrackEntity } from './audio-track/audio-track.entity';
 import { AudioChunkEntity } from './audio-chunk/audio-chunk.entity';
@@ -15,10 +16,10 @@ import { CommonModule } from './common/common.module';
 import { AiModule } from './ai/ai.module';
 import { BillingModule } from './billing/billing.module';
 import { StreamingModule } from './streaming/streaming.module';
-import { HealthController } from './health/health.controller';
+import { HealthModule } from './health/health.module';
 
 @Module({
-  controllers: [HealthController],
+  controllers: [],
   imports: [
     ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
     TypeOrmModule.forRootAsync({
@@ -57,6 +58,13 @@ import { HealthController } from './health/health.controller';
     AudioIngestModule,
     QueueModule,
     RagModule,
+    HealthModule,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(createTraceMiddleware({ label: 'api' }))
+      .forRoutes('*');
+  }
+}

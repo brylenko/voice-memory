@@ -15,6 +15,11 @@
     "strictPropertyInitialization": false,
     "noImplicitAny": false,
     "resolveJsonModule": true,
+    "paths": {
+      "loopwarden/nestjs": ["./node_modules/loopwarden/dist/integrations/nestjs.d.ts"],
+      "loopwarden/express": ["./node_modules/loopwarden/dist/integrations/express.d.ts"],
+      "loopwarden/fastify": ["./node_modules/loopwarden/dist/integrations/fastify.d.ts"]
+    },
     "sourceMap": true,
     "declaration": false
   },

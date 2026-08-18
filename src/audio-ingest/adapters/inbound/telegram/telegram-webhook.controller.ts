@@ -1,4 +1,5 @@
 import { Body, Controller, HttpCode, HttpStatus, Inject, Logger, Post, UseGuards } from '@nestjs/common';
+import { withTraceId } from 'loopwarden';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TelegramWebhookGuard } from './telegram-webhook.guard';
@@ -35,6 +36,10 @@ export class TelegramWebhookController {
   @UseGuards(TelegramWebhookGuard)
   @HttpCode(HttpStatus.OK)
   async handleUpdate(@Body() update: TelegramUpdate): Promise<{ ok: true }> {
+    return withTraceId(String(update.update_id), 'telegram-webhook', () => this.processUpdate(update));
+  }
+
+  private async processUpdate(update: TelegramUpdate): Promise<{ ok: true }> {
     // Handle inline keyboard button clicks
     if (update.callback_query) {
       const cq = update.callback_query;
