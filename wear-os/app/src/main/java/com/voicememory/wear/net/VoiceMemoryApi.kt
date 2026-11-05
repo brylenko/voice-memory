@@ -22,6 +22,21 @@ class ApiException(val code: Int, message: String) : IOException(message) {
 }
 
 data class DayItem(val at: String, val summary: String, val tags: List<String>, val live: Boolean)
+/** Result of phase 1, persisted by the uploader so retries reuse the same track. */
+data class UploadTicket(val trackId: String, val uploadUrl: String, val expiresAtMs: Long) {
+    fun isFresh(nowMs: Long = System.currentTimeMillis()) = nowMs < expiresAtMs - 60_000
+
+    fun toJson(): String = JSONObject()
+        .put("trackId", trackId).put("uploadUrl", uploadUrl).put("expiresAtMs", expiresAtMs).toString()
+
+    companion object {
+        fun fromJson(raw: String): UploadTicket? = runCatching {
+            val o = JSONObject(raw)
+            UploadTicket(o.getString("trackId"), o.getString("uploadUrl"), o.getLong("expiresAtMs"))
+        }.getOrNull()
+    }
+}
+
 data class DayMemory(val date: String, val digest: String?, val items: List<DayItem>)
 
 /** Thin facade over the backend REST + WebSocket endpoints (Facade pattern). */
@@ -32,31 +47,36 @@ class VoiceMemoryApi(
 ) {
     private val json = "application/json".toMediaType()
 
-    /**
-     * Two-phase direct-to-storage upload (same flow the IoT recorder uses):
-     * 1) POST /audio/upload-url  2) PUT bytes to returned URL  3) POST /audio/upload-complete
-     */
-    suspend fun uploadRecording(file: File, durationSeconds: Int, contentType: String): String =
-        withContext(Dispatchers.IO) {
-            val phase1 = postJson(
-                "/audio/upload-url",
-                JSONObject()
-                    .put("durationSeconds", durationSeconds.coerceAtLeast(1))
-                    .put("fileName", file.name)
-                    .put("channel", "wear-os"),
-            )
-            val trackId = phase1.getString("trackId")
-            val uploadUrl = phase1.getString("uploadUrl")
+    /** Phase 1: reserve a track + get a URL to PUT the bytes to. */
+    suspend fun requestUpload(fileName: String, durationSeconds: Int): UploadTicket = withContext(Dispatchers.IO) {
+        val res = postJson(
+            "/audio/upload-url",
+            JSONObject()
+                .put("durationSeconds", durationSeconds.coerceAtLeast(1))
+                .put("fileName", fileName)
+                .put("channel", "wear-os"),
+        )
+        UploadTicket(
+            trackId = res.getString("trackId"),
+            uploadUrl = res.getString("uploadUrl"),
+            expiresAtMs = System.currentTimeMillis() + res.optLong("expiresInSeconds", 900) * 1000,
+        )
+    }
 
-            val put = Request.Builder()
-                .url(uploadUrl)
-                .put(file.asRequestBody(contentType.toMediaType()))
-                .build()
-            http.newCall(put).execute().use { it.ensureSuccess() }
+    /** Phase 2: PUT the bytes straight to storage (S3 presigned URL or local-upload endpoint). */
+    suspend fun putFile(ticket: UploadTicket, file: File, contentType: String) = withContext(Dispatchers.IO) {
+        val put = Request.Builder()
+            .url(ticket.uploadUrl)
+            .put(file.asRequestBody(contentType.toMediaType()))
+            .build()
+        http.newCall(put).execute().use { it.ensureSuccess() }
+    }
 
-            postJson("/audio/upload-complete", JSONObject().put("trackId", trackId))
-            trackId
-        }
+    /** Phase 3: tell the backend the bytes are there → processing starts. Idempotent server-side. */
+    suspend fun completeUpload(trackId: String) = withContext(Dispatchers.IO) {
+        postJson("/audio/upload-complete", JSONObject().put("trackId", trackId))
+        Unit
+    }
 
     suspend fun getDay(tzOffsetMinutes: Int, date: String? = null): DayMemory = withContext(Dispatchers.IO) {
         val url = "$baseUrl/api/memory/day".toHttpUrl().newBuilder()

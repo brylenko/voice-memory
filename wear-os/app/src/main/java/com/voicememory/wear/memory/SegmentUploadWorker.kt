@@ -13,6 +13,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.voicememory.wear.AppContainer
 import com.voicememory.wear.net.ApiException
+import com.voicememory.wear.net.UploadTicket
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -28,14 +29,36 @@ class SegmentUploadWorker(context: Context, params: WorkerParameters) : Coroutin
         if (!file.exists()) return Result.success() // already uploaded by an earlier attempt
 
         val api = AppContainer.get(applicationContext).api
+        // Phase-1 ticket is persisted next to the file: a retry re-uses the same track
+        // instead of creating a new (soon abandoned) INITIALIZED track on the server.
+        val ticketFile = File(file.path + TICKET_SUFFIX)
+
         return try {
-            api.uploadRecording(file, SegmentStore.durationOf(file), "audio/mp4")
+            val ticket = ticketFile.takeIf { it.exists() }
+                ?.let { UploadTicket.fromJson(it.readText()) }
+                ?.takeIf { it.isFresh() }
+                ?: api.requestUpload(file.name, SegmentStore.durationOf(file)).also { ticketFile.writeText(it.toJson()) }
+
+            try {
+                api.putFile(ticket, file, "audio/mp4")
+            } catch (e: ApiException) {
+                // Upload URL rejected (expired presign / wrong host): next attempt asks for a fresh one.
+                if (e.isPermanent) ticketFile.delete()
+                throw RetryableUpload(e)
+            }
+            api.completeUpload(ticket.trackId)
+
             file.delete()
+            ticketFile.delete()
             Result.success()
+        } catch (e: RetryableUpload) {
+            Log.w(TAG, "upload ${file.name}: PUT failed, will retry: ${e.cause?.message}")
+            Result.retry()
         } catch (e: ApiException) {
             Log.w(TAG, "upload ${file.name} failed: ${e.message}")
             if (e.isPermanent) {
                 file.delete() // e.g. 403 quota exceeded → retrying won't help
+                ticketFile.delete()
                 Result.failure()
             } else Result.retry()
         } catch (e: Exception) {
@@ -44,9 +67,12 @@ class SegmentUploadWorker(context: Context, params: WorkerParameters) : Coroutin
         }
     }
 
+    private class RetryableUpload(cause: Throwable) : Exception(cause)
+
     companion object {
         private const val TAG = "SegmentUpload"
         private const val KEY_PATH = "path"
+        private const val TICKET_SUFFIX = ".ticket"
 
         fun enqueue(context: Context, file: File) {
             val request = OneTimeWorkRequestBuilder<SegmentUploadWorker>()
