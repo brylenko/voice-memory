@@ -28,6 +28,7 @@ import com.voicememory.wear.memory.sink.LiveSegmentSink
 import com.voicememory.wear.memory.sink.SegmentSink
 import com.voicememory.wear.ui.MainActivity
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
@@ -102,7 +103,9 @@ class MemoryRecorderService : LifecycleService() {
         }
         acquireWakeLock()
         MemoryStatus.update { it.copy(paused = false) }
-        captureJob = lifecycleScope.launch { captureLoop() }
+        // Default dispatcher: VAD + AAC encoding (blocking MediaCodec calls) run ~33×/s
+        // and must never touch the main thread, or the whole watch UI stutters.
+        captureJob = lifecycleScope.launch(Dispatchers.Default) { captureLoop() }
     }
 
     @Suppress("MissingPermission") // checked in resumeCapture()

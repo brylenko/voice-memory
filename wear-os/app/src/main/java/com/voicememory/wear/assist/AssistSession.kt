@@ -7,6 +7,7 @@ import com.voicememory.wear.audio.PcmRecorder
 import com.voicememory.wear.audio.toLittleEndianBytes
 import com.voicememory.wear.net.VoiceMemoryApi
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -41,7 +42,7 @@ class AssistSession(
     fun start(mode: AssistMode, save: Boolean) {
         _state.value = AssistState(status = ConnectionStatus.CONNECTING, mode = mode)
         socket = api.openAssistant(mode.wire, save, language, listener)
-        micJob = scope.launch {
+        micJob = scope.launch(Dispatchers.Default) { // PCM → bytes off the main thread
             // Frames are streamed immediately; the server buffers them until auth completes.
             PcmRecorder.frames(SAMPLE_RATE, FRAME_MS).collect { frame ->
                 socket?.send(frame.toLittleEndianBytes().toByteString())
