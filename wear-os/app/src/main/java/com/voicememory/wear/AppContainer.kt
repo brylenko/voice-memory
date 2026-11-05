@@ -12,8 +12,9 @@ import java.util.concurrent.TimeUnit
  * one signer, one API facade for the whole process.
  */
 class AppContainer private constructor(context: Context) {
+    val config: ServerConfig = ServerConfig.load(context)
     val deviceId: String = DeviceIdentity.deviceId(context)
-    val signer = DeviceSigner(deviceId, BuildConfig.HMAC_SECRET)
+    val signer = DeviceSigner(deviceId, config.hmacSecret)
     val language: String? = BuildConfig.LANGUAGE.ifBlank { null }
 
     val http: OkHttpClient = OkHttpClient.Builder()
@@ -23,7 +24,7 @@ class AppContainer private constructor(context: Context) {
         .pingInterval(20, TimeUnit.SECONDS) // keeps the assistant WebSocket alive through NATs
         .build()
 
-    val api = VoiceMemoryApi(BuildConfig.BASE_URL.trimEnd('/'), http, signer)
+    val api = VoiceMemoryApi(config.baseUrl.trimEnd('/'), http, signer)
 
     companion object {
         @Volatile private var instance: AppContainer? = null

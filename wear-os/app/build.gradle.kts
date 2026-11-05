@@ -25,7 +25,7 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        buildConfigField("String", "BASE_URL", "\"${cfg("voicememory.baseUrl", "VOICEMEMORY_BASE_URL", "http://10.0.2.2:3000")}\"")
+        buildConfigField("String", "BASE_URL", "\"${cfg("voicememory.baseUrl", "VOICEMEMORY_BASE_URL", "http://localhost:3000")}\"")
         buildConfigField("String", "HMAC_SECRET", "\"${cfg("voicememory.hmacSecret", "VOICEMEMORY_HMAC_SECRET")}\"")
         buildConfigField("String", "LANGUAGE", "\"${cfg("voicememory.language", "VOICEMEMORY_LANGUAGE")}\"")
     }

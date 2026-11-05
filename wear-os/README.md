@@ -72,6 +72,26 @@ cp local.properties.example local.properties   # заполнить sdk.dir, bas
 2. `adb pair <ip>:<port>` (код сопряжения на часах), затем `adb connect <ip>:<port>`.
 3. `./gradlew :app:installDebug`.
 
+## Проверка с бэкендом на своём компьютере (debug-сборка)
+
+Без пересборки APK: часы ходят на `localhost:3000`, а `adb reverse` пробрасывает
+этот порт на компьютер (работает и по USB, и по Wi‑Fi-отладке).
+
+```bash
+# 1. бэкенд локально, DEVICE_HMAC_SECRET в .env = секрет, который передадим часам
+docker compose up -d && npm run build && npm run migrate && npm start
+
+# 2. проброс порта часы → компьютер (повторять после каждого adb connect)
+adb reverse tcp:3000 tcp:3000
+
+# 3. указать приложению адрес и секрет (только debug; -S перезапускает процесс)
+adb shell am start -S -n com.voicememory.wear/.ui.MainActivity \
+    --es baseUrl http://localhost:3000 --es hmacSecret <DEVICE_HMAC_SECRET>
+```
+
+Debug-сборка разрешает `http://` (`src/debug/AndroidManifest.xml`); release — только HTTPS,
+и переопределение адреса через adb в release игнорируется.
+
 ## Архитектура
 
 ```

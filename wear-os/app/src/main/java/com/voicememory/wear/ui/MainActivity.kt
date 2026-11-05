@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
+import com.voicememory.wear.ServerConfig
 
 class MainActivity : ComponentActivity() {
 
@@ -22,6 +23,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Must run before AppContainer is first created (use `am start -S` to restart the process).
+        ServerConfig.applyOverrides(this, intent)
         micGranted.value = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
 
