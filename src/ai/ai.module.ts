@@ -12,6 +12,10 @@ import { OpenAiChatCompletionAdapter } from './adapters/openai-chat-completion.a
 import { OpenAiSummarizationAdapter } from './adapters/openai-summarization.adapter';
 import { OpenAiIntentClassifierAdapter } from './adapters/openai-intent-classifier.adapter';
 import { OpenAiStreamingTranscriptionAdapter } from './adapters/openai-streaming-transcription.adapter';
+import { UTTERANCE_TRANSCRIPTION_PORT } from './ports/utterance-transcription.port';
+import { CHAT_STREAM_PORT } from './ports/chat-stream.port';
+import { OpenAiUtteranceTranscriptionAdapter } from './adapters/openai-utterance-transcription.adapter';
+import { OpenAiChatStreamAdapter } from './adapters/openai-chat-stream.adapter';
 
 @Global()
 @Module({
@@ -23,7 +27,10 @@ import { OpenAiStreamingTranscriptionAdapter } from './adapters/openai-streaming
     { provide: SUMMARIZATION_PORT, useClass: OpenAiSummarizationAdapter },
     { provide: INTENT_CLASSIFIER_PORT, useClass: OpenAiIntentClassifierAdapter },
     { provide: STREAMING_TRANSCRIPTION_PORT, useClass: OpenAiStreamingTranscriptionAdapter },
+    { provide: UTTERANCE_TRANSCRIPTION_PORT, useClass: OpenAiUtteranceTranscriptionAdapter },
+    { provide: CHAT_STREAM_PORT, useClass: OpenAiChatStreamAdapter },
   ],
-  exports: [TRANSCRIPTION_PORT, EMBEDDING_PORT, CHAT_COMPLETION_PORT, SUMMARIZATION_PORT, INTENT_CLASSIFIER_PORT, STREAMING_TRANSCRIPTION_PORT],
+  exports: [TRANSCRIPTION_PORT, EMBEDDING_PORT, CHAT_COMPLETION_PORT, SUMMARIZATION_PORT, INTENT_CLASSIFIER_PORT, STREAMING_TRANSCRIPTION_PORT,
+    UTTERANCE_TRANSCRIPTION_PORT, CHAT_STREAM_PORT],
 })
 export class AiModule {}

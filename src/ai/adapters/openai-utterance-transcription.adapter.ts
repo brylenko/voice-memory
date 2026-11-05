@@ -1,0 +1,147 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import WebSocket from 'ws';
+import type { Readable } from 'stream';
+import { AsyncQueue } from '../../common/services/async-queue';
+import type {
+  UtteranceEvent,
+  UtteranceTranscriptionOptions,
+  UtteranceTranscriptionPort,
+} from '../ports/utterance-transcription.port';
+
+const REALTIME_URL = 'wss://api.openai.com/v1/realtime?intent=transcription';
+/** After the client says "end", wait at most this long for the last turn's transcript. */
+const DRAIN_TIMEOUT_MS = 5_000;
+
+/**
+ * OpenAI Realtime transcription session with server-side VAD: the API itself
+ * cuts the audio into turns and emits one `completed` transcript per turn,
+ * which maps 1:1 onto our `final` utterance event.
+ *
+ * Audio contract: PCM16 mono 24 kHz (same as StreamingGateway).
+ */
+@Injectable()
+export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscriptionPort {
+  private readonly logger = new Logger(OpenAiUtteranceTranscriptionAdapter.name);
+  private readonly apiKey: string;
+
+  constructor(config: ConfigService) {
+    this.apiKey = config.get<string>('openaiApiKey') ?? '';
+  }
+
+  transcribeUtterances(
+    audioStream: Readable,
+    options: UtteranceTranscriptionOptions = {},
+  ): AsyncIterable<UtteranceEvent> {
+    const queue = new AsyncQueue<UtteranceEvent>();
+    const partials = new Map<string, string>();
+    const pendingAudio: Buffer[] = [];
+    let ready = false;
+    let drainTimer: NodeJS.Timeout | null = null;
+
+    const ws = new WebSocket(REALTIME_URL, {
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+    });
+
+    const sendAudio = (chunk: Buffer) =>
+      ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: chunk.toString('base64') }));
+
+    const close = () => {
+      if (drainTimer) clearTimeout(drainTimer);
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close();
+      queue.end();
+    };
+
+    const beginDrain = () => {
+      if (drainTimer) return;
+      if (ws.readyState === WebSocket.OPEN) {
+        // Flush whatever is left in the buffer as a final turn; an empty buffer
+        // yields `input_audio_buffer_commit_empty`, handled below.
+        ws.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+      }
+      drainTimer = setTimeout(close, DRAIN_TIMEOUT_MS);
+    };
+
+    audioStream.on('data', (chunk: Buffer) => {
+      if (ready && ws.readyState === WebSocket.OPEN) sendAudio(chunk);
+      else pendingAudio.push(chunk);
+    });
+    audioStream.on('end', () => { if (ready) beginDrain(); });
+    audioStream.on('error', (err) => { queue.fail(err); close(); });
+
+    ws.on('open', () => {
+      ws.send(JSON.stringify({
+        type: 'session.update',
+        session: {
+          type: 'transcription',
+          audio: {
+            input: {
+              format: { type: 'audio/pcm', rate: 24000 },
+              noise_reduction: { type: 'far_field' },
+              transcription: {
+                model: 'gpt-realtime-whisper',
+                ...(options.language ? { language: options.language } : {}),
+              },
+              turn_detection: {
+                type: 'server_vad',
+                threshold: 0.5,
+                prefix_padding_ms: 300,
+                silence_duration_ms: options.silenceMs ?? 600,
+              },
+            },
+          },
+        },
+      }));
+    });
+
+    ws.on('message', (raw) => {
+      let event: Record<string, unknown>;
+      try { event = JSON.parse(raw.toString()) as Record<string, unknown>; } catch { return; }
+      const type = event.type as string;
+      const itemId = (event.item_id as string | undefined) ?? '';
+
+      switch (type) {
+        case 'session.created':
+        case 'session.updated':
+          if (ready) return;
+          ready = true;
+          for (const chunk of pendingAudio) sendAudio(chunk);
+          pendingAudio.length = 0;
+          if (audioStream.readableEnded) beginDrain();
+          return;
+
+        case 'conversation.item.input_audio_transcription.delta': {
+          const text = (partials.get(itemId) ?? '') + ((event.delta as string) ?? '');
+          partials.set(itemId, text);
+          queue.push({ type: 'partial', utteranceId: itemId, text });
+          return;
+        }
+
+        case 'conversation.item.input_audio_transcription.completed': {
+          const text = ((event.transcript as string) ?? partials.get(itemId) ?? '').trim();
+          partials.delete(itemId);
+          if (text) queue.push({ type: 'final', utteranceId: itemId, text });
+          if (drainTimer) close();
+          return;
+        }
+
+        case 'error': {
+          const err = event.error as { code?: string; message?: string } | undefined;
+          if (err?.code === 'input_audio_buffer_commit_empty') {
+            if (drainTimer) close();
+            return;
+          }
+          this.logger.error(`Realtime error: ${JSON.stringify(err)}`);
+          queue.fail(new Error(err?.message ?? 'Realtime transcription error'));
+          close();
+          return;
+        }
+      }
+    });
+
+    ws.on('error', (err) => { queue.fail(err); close(); });
+    ws.on('close', () => queue.end());
+
+    return queue;
+  }
+}

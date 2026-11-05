@@ -1,0 +1,25 @@
+<resources>
+    <string name="memory_mode">Память</string>
+    <string name="memory_on">Слушаю весь день</string>
+    <string name="memory_off">Выключено</string>
+    <string name="assist_mode">Ассистент</string>
+    <string name="assist_hint">Ответы вживую</string>
+    <string name="today">Сегодня</string>
+    <string name="today_hint">Что я слышал</string>
+    <string name="ask">Ответить</string>
+    <string name="stop">Стоп</string>
+    <string name="auto">Авто</string>
+    <string name="manual">По тапу</string>
+    <string name="speak">Озвучка</string>
+    <string name="save">Сохранять</string>
+    <string name="connecting">Подключение…</string>
+    <string name="listening">Слушаю…</string>
+    <string name="nothing_today">Сегодня пока ничего не записано</string>
+    <string name="loading">Загрузка…</string>
+    <string name="error_prefix">Ошибка: %1$s</string>
+    <string name="mic_permission_needed">Нужен доступ к микрофону</string>
+    <string name="notif_channel">Запись</string>
+    <string name="notif_memory_title">Voice Memory слушает</string>
+    <string name="notif_memory_text">Сохранено фрагментов сегодня: %1$d</string>
+    <string name="action_stop">Стоп</string>
+</resources>

@@ -17,6 +17,8 @@ import { AiModule } from './ai/ai.module';
 import { BillingModule } from './billing/billing.module';
 import { StreamingModule } from './streaming/streaming.module';
 import { HealthModule } from './health/health.module';
+import { AssistantModule } from './assistant/assistant.module';
+import { MemoryModule } from './memory/memory.module';
 
 @Module({
   controllers: [],
@@ -59,6 +61,8 @@ import { HealthModule } from './health/health.module';
     QueueModule,
     RagModule,
     HealthModule,
+    AssistantModule,
+    MemoryModule,
   ],
 })
 export class AppModule implements NestModule {

@@ -10,7 +10,8 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { IsInt, IsNotEmpty, IsPositive, IsString } from 'class-validator';
+import { IsIn, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString } from 'class-validator';
+import type { AudioSourceChannel } from '../../../application/ports/outbound/audio-track-writer.port';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type { Request } from 'express';
@@ -39,6 +40,11 @@ class RequestUploadDto {
   @IsString()
   @IsNotEmpty()
   fileName: string;
+
+  /** Which kind of device recorded it; Telegram is not a valid choice here. */
+  @IsOptional()
+  @IsIn(['iot-device', 'wear-os'])
+  channel?: Extract<AudioSourceChannel, 'iot-device' | 'wear-os'>;
 }
 
 class CompleteUploadDto {
@@ -82,7 +88,7 @@ export class UploadController {
     try {
       return await this.requestUpload.execute({
         userId,
-        channel: 'iot-device',
+        channel: dto.channel ?? 'iot-device',
         durationSeconds: dto.durationSeconds,
         suggestedFileName: dto.fileName,
       });

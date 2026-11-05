@@ -1,13 +1,10 @@
 import { Inject, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import {
   WebSocketGateway,
   WebSocketServer,
   OnGatewayConnection,
   OnGatewayDisconnect,
 } from '@nestjs/websockets';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { Server, WebSocket } from 'ws';
 import { Readable } from 'stream';
 import { IncomingMessage } from 'http';
@@ -16,13 +13,8 @@ import {
   STREAMING_TRANSCRIPTION_PORT,
   StreamingTranscriptionPort,
 } from '../ai/ports/streaming-transcription.port';
-import { EMBEDDING_PORT, EmbeddingPort } from '../ai/ports/embedding.port';
-import { SUMMARIZATION_PORT, SummarizationPort, SummaryTemplate } from '../ai/ports/summarization.port';
-import { AudioTrackEntity, AudioTrackStatus } from '../audio-track/audio-track.entity';
-import { AudioChunkRepository } from '../audio-chunk/audio-chunk.repository';
-import { UserEntity } from '../user/user.entity';
-import { chunkTextBySentence, dayOfWeekOf } from '../common/services/text-chunker.util';
-import { EncryptionService } from '../common/services/encryption.service';
+import { DeviceUserResolver } from '../user/device-user.resolver';
+import { LiveTrackService } from './live-track.service';
 import { WsHmacAuthService, WsAuthError } from './ws-hmac-auth.service';
 
 interface TranscriptDelta   { type: 'transcript'; text: string; }
@@ -62,39 +54,10 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
   constructor(
     @Inject(STREAMING_TRANSCRIPTION_PORT)
     private readonly streaming: StreamingTranscriptionPort,
-    @Inject(EMBEDDING_PORT)
-    private readonly embedding: EmbeddingPort,
-    @Inject(SUMMARIZATION_PORT)
-    private readonly summarization: SummarizationPort,
-    @InjectRepository(AudioTrackEntity)
-    private readonly trackRepo: Repository<AudioTrackEntity>,
-    @InjectRepository(UserEntity)
-    private readonly userRepo: Repository<UserEntity>,
-    private readonly chunkRepo: AudioChunkRepository,
-    private readonly config: ConfigService,
-    private readonly encryption: EncryptionService,
+    private readonly users: DeviceUserResolver,
+    private readonly liveTracks: LiveTrackService,
     private readonly wsAuth: WsHmacAuthService,
   ) {}
-
-  private async resolveUser(externalId: string): Promise<{ id: string; quotaExceeded: boolean }> {
-    // Atomic upsert prevents UNIQUE violation under concurrent connections from the same device.
-    const rows: Array<{ id: string }> = await this.userRepo.manager.query(
-      `INSERT INTO users ("deviceId") VALUES ($1)
-       ON CONFLICT ("deviceId") DO NOTHING
-       RETURNING id`,
-      [externalId],
-    );
-    let user: { id: string; freeTracksUsed: number };
-    if (rows.length > 0) {
-      this.logger.log(`Created new user for deviceId=${externalId}: ${rows[0].id}`);
-      user = { id: rows[0].id, freeTracksUsed: 0 };
-    } else {
-      user = (await this.userRepo.findOneByOrFail({ deviceId: externalId })) as { id: string; freeTracksUsed: number };
-    }
-    const limit = this.config.get<number>('payment.freeTracksLimit') ?? 10;
-    const quotaExceeded = limit > 0 && user.freeTracksUsed >= limit;
-    return { id: user.id, quotaExceeded };
-  }
 
   handleConnection(client: WebSocket, req: IncomingMessage) {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
@@ -133,14 +96,14 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
           pendingFrames.push(data as Buffer);
           if (pendingFrames.length === 1) {
             // First frame — kick off auth once; subsequent frames just buffer.
-            void this.resolveUser(externalId).then(({ id: userId, quotaExceeded }) => {
-              if (quotaExceeded && this.config.get<boolean>('payment.required')) {
+            void this.users.resolve(externalId).then(({ id: userId, blocked }) => {
+              if (blocked) {
                 authState = 'rejected';
                 pendingFrames.length = 0;
                 this.send(client, {
                   type: 'error',
                   message: 'Free quota exceeded. Please upgrade to continue.',
-                  paymentUrl: this.config.get<string>('payment.url'),
+                  paymentUrl: this.users.paymentUrl,
                 });
                 client.close();
                 return;
@@ -191,27 +154,11 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (!userId) return;
 
     // Create track immediately so partial text is never lost
-    const track = await this.trackRepo.save(
-      this.trackRepo.create({
-        userId,
-        channel: 'web-live',
-        duration: 0,
-        fileUrl: '',
-        status: AudioTrackStatus.PROCESSING,
-        fullText: '',
-      }),
-    );
-    this.logger.log(`[${track.id}] live session started`);
+    const trackId = await this.liveTracks.start(userId, 'web-live');
+    this.logger.log(`[${trackId}] live session started`);
 
     const FLUSH_EVERY = 200; // chars
     let unflushedChars = 0;
-
-    const flushText = async (text: string) => {
-      await this.trackRepo.manager.query(
-        `UPDATE audio_tracks SET "fullText" = $1 WHERE id = $2`,
-        [text, track.id],
-      );
-    };
 
     try {
       for await (const delta of this.streaming.transcribeStream(audioStream, { language: lang })) {
@@ -221,86 +168,23 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
         if (unflushedChars >= FLUSH_EVERY) {
           unflushedChars = 0;
-          flushText(deltas.join('')).catch((err: Error) =>
-            this.logger.error(`[${track.id}] partial text flush failed: ${err.message}`),
+          this.liveTracks.savePartial(trackId, deltas.join('')).catch((err: Error) =>
+            this.logger.error(`[${trackId}] partial text flush failed: ${err.message}`),
           );
         }
       }
 
       this.sessions.delete(client);
-
       const fullText = deltas.join('');
-      const trackId = await this.finalize(track.id, userId, fullText);
-
+      await this.liveTracks.finalize(trackId, userId, fullText);
       this.send(client, { type: 'done', fullText, trackId });
       client.close();
     } catch (err) {
       this.sessions.delete(client);
-      // Save whatever we have so far on error
-      const partial = deltas.join('');
-      if (partial.trim()) {
-        await this.trackRepo.update(track.id, {
-          fullText: partial,
-          status: AudioTrackStatus.FAILED,
-        });
-      }
+      await this.liveTracks.markFailed(trackId, deltas.join(''));
       this.logger.error('Streaming transcription error', err as Error);
       this.send(client, { type: 'error', message: (err as Error).message });
     }
-  }
-
-  /** Final save: tags, search vector, embeddings, status=COMPLETED. */
-  private async finalize(trackId: string, userId: string, fullText: string): Promise<string> {
-    if (!fullText.trim()) return trackId;
-
-    const track = await this.trackRepo.findOneByOrFail({ id: trackId });
-    const [summarizeResult, textChunks] = await Promise.all([
-      this.summarization.summarize(fullText, SummaryTemplate.Custom, track.createdAt),
-      Promise.resolve(chunkTextBySentence(fullText, 800)),
-    ]);
-    const { tags, eventDate } = summarizeResult;
-
-    // Atomic: status transition + quota increment in one transaction.
-    // WHERE status != COMPLETED makes this idempotent under retry/concurrent finalize.
-    const isFirstCompletion = await this.trackRepo.manager.transaction(async (tx) => {
-      const rows: Array<{ userId: string }> = await tx.query(
-        `UPDATE audio_tracks
-         SET "fullText" = $1, "searchVector" = to_tsvector('simple', $2),
-             tags = $3, "eventDate" = $4, "tagsProcessed" = TRUE, status = $5
-         WHERE id = $6 AND status != $5
-         RETURNING "userId"`,
-        [this.encryption.encrypt(fullText), fullText, tags, eventDate, AudioTrackStatus.COMPLETED, trackId],
-      );
-      if (rows.length === 0) return false;
-      await tx.query(
-        `UPDATE users SET "freeTracksUsed" = "freeTracksUsed" + 1 WHERE id = $1`,
-        [rows[0].userId],
-      );
-      return true;
-    });
-
-    if (!isFirstCompletion) {
-      this.logger.warn(`[${trackId}] finalize: track already COMPLETED — skipping chunks and quota`);
-      return trackId;
-    }
-
-    const chunkInserts = textChunks.length > 0
-      ? await (async () => {
-          const vectors = await this.embedding.embed(textChunks);
-          const now = new Date();
-          return textChunks.map((text, i) => ({
-            trackId,
-            userId,
-            text,
-            embedding: vectors[i],
-            dayOfWeek: dayOfWeekOf(now),
-            createdAt: now,
-          }));
-        })()
-      : [];
-    await this.chunkRepo.replaceChunks(trackId, chunkInserts);
-    this.logger.log(`[${trackId}] finalized live transcript (${fullText.length} chars, ${textChunks.length} chunks, tags: ${tags.join(', ')}, eventDate: ${eventDate?.toISOString() ?? 'null'})`);
-    return trackId;
   }
 
   private send(client: WebSocket, event: ServerEvent): void {

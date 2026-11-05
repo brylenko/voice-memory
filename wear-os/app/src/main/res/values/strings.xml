@@ -1,0 +1,26 @@
+<resources>
+    <string name="app_name">Voice Memory</string>
+    <string name="memory_mode">Memory</string>
+    <string name="memory_on">Listening all day</string>
+    <string name="memory_off">Off</string>
+    <string name="assist_mode">Assistant</string>
+    <string name="assist_hint">Live answers</string>
+    <string name="today">Today</string>
+    <string name="today_hint">What I heard</string>
+    <string name="ask">Answer</string>
+    <string name="stop">Stop</string>
+    <string name="auto">Auto</string>
+    <string name="manual">On tap</string>
+    <string name="speak">Speak</string>
+    <string name="save">Save</string>
+    <string name="connecting">Connecting…</string>
+    <string name="listening">Listening…</string>
+    <string name="nothing_today">Nothing heard yet today</string>
+    <string name="loading">Loading…</string>
+    <string name="error_prefix">Error: %1$s</string>
+    <string name="mic_permission_needed">Microphone permission is required</string>
+    <string name="notif_channel">Recording</string>
+    <string name="notif_memory_title">Voice Memory is listening</string>
+    <string name="notif_memory_text">%1$d segments saved today</string>
+    <string name="action_stop">Stop</string>
+</resources>

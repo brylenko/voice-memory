@@ -5,7 +5,7 @@ import type { AudioTrackEntity } from '../../../../audio-track/audio-track.entit
  * ingestion source (WhatsApp, a web recorder, etc.) means adding a new value
  * here plus a new inbound adapter — nothing in the application core changes.
  */
-export type AudioSourceChannel = 'iot-device' | 'telegram';
+export type AudioSourceChannel = 'iot-device' | 'wear-os' | 'telegram';
 
 export interface CreateTrackInput {
   userId: string;

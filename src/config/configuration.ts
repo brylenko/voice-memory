@@ -21,6 +21,10 @@ export default () => ({
     hmacSecret: process.env.DEVICE_HMAC_SECRET ?? '',
     signatureTtlSeconds: parseInt(process.env.DEVICE_SIGNATURE_TTL_SECONDS ?? '300', 10),
   },
+  assistant: {
+    // Ground live answers in what the watch heard earlier (one embedding + pgvector query per answer).
+    memoryLookup: process.env.ASSISTANT_MEMORY_LOOKUP !== 'false',
+  },
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? '',
     webhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET ?? '',
