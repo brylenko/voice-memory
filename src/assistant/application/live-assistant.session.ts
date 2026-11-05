@@ -21,6 +21,8 @@ export interface LiveAssistantDeps {
   chat: ChatStreamPort;
   memory: MemoryContextPort | null;
   log?: (msg: string) => void;
+  /** Decision trace (skip / answer), for diagnostics. Never receives user text. */
+  trace?: (msg: string) => void;
 }
 
 export interface LiveAssistantContext {
@@ -117,7 +119,10 @@ export class LiveAssistantSession {
       });
 
       const gated = await gateAnswer(this.deps.chat.stream(messages, { temperature: 0.3 }));
-      if (!gated) return;
+      if (!gated) {
+        this.deps.trace?.(`skip (no hint needed, forced=${forced})`);
+        return;
+      }
 
       for await (const delta of gated) {
         if (this.closed) break;
@@ -129,7 +134,10 @@ export class LiveAssistantSession {
         this.emit({ type: 'answer.delta', id: answerId, text: delta });
         if (answer.length > MAX_ANSWER_CHARS * 2) break; // runaway guard
       }
-      if (started && !this.closed) this.emit({ type: 'answer.done', id: answerId, text: answer.trim() });
+      if (started && !this.closed) {
+        this.emit({ type: 'answer.done', id: answerId, text: answer.trim() });
+        this.deps.trace?.(`answered (${answer.trim().length} chars, forced=${forced})`);
+      }
     } catch (err) {
       this.deps.log?.(`answer failed: ${(err as Error).message}`);
       if (!this.closed) this.emit({ type: 'answer.error', id: answerId, message: 'Could not generate an answer' });

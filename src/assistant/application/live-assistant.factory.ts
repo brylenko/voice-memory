@@ -29,6 +29,7 @@ export class LiveAssistantFactory {
         chat: this.chat,
         memory: useMemory ? this.memory : null,
         log: (msg) => this.logger.warn(msg),
+        trace: (msg) => this.logger.log(msg),
       },
       ctx,
       emit,

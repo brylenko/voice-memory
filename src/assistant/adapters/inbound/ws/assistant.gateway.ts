@@ -165,6 +165,7 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
     opts: { lang?: string; save: boolean },
   ): Promise<void> {
     const transcript: string[] = [];
+    this.logger.log(`assistant session started (save=${opts.save})`);
     const trackId = opts.save ? await this.liveTracks.start(userId, 'wear-assist') : undefined;
 
     try {
@@ -183,6 +184,7 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
         }
       }
 
+      this.logger.log(`assistant session ended (${transcript.length} utterances)`);
       await conn.assistant?.idle();
       if (trackId) await this.liveTracks.finalize(trackId, userId, transcript.join('\n'));
       this.send(client, { type: 'done', trackId });

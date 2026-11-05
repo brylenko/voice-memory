@@ -107,11 +107,17 @@ export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscripti
       switch (type) {
         case 'session.created':
         case 'session.updated':
+          this.logger.log(`← ${type} (model=${this.model})`);
           if (ready) return;
           ready = true;
           for (const chunk of pendingAudio) sendAudio(chunk);
           pendingAudio.length = 0;
           if (audioStream.readableEnded) beginDrain();
+          return;
+
+        case 'input_audio_buffer.speech_started':
+        case 'input_audio_buffer.speech_stopped':
+          this.logger.log(`← ${type}`);
           return;
 
         case 'conversation.item.input_audio_transcription.delta': {
@@ -124,6 +130,8 @@ export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscripti
         case 'conversation.item.input_audio_transcription.completed': {
           const text = ((event.transcript as string) ?? partials.get(itemId) ?? '').trim();
           partials.delete(itemId);
+          // Length only — never log what the user said.
+          this.logger.log(`← utterance completed (${text.length} chars)`);
           if (text) queue.push({ type: 'final', utteranceId: itemId, text });
           if (drainTimer) close();
           return;
@@ -143,8 +151,14 @@ export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscripti
       }
     });
 
-    ws.on('error', (err) => { queue.fail(err); close(); });
-    ws.on('close', () => queue.end());
+    let audioBytes = 0;
+    audioStream.on('data', (chunk: Buffer) => { audioBytes += chunk.length; });
+
+    ws.on('error', (err) => { this.logger.error(`Realtime WS error: ${err.message}`); queue.fail(err); close(); });
+    ws.on('close', (code, reason) => {
+      this.logger.log(`← Realtime WS closed (code=${code}${reason.length ? `, reason=${reason.toString()}` : ''}, audio received=${Math.round(audioBytes / 48_000)}s)`);
+      queue.end();
+    });
 
     return queue;
   }
