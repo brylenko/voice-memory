@@ -16,3 +16,24 @@ class TransportPolicyTest {
     @Test fun `uses segments when offline even on the charger`() =
         assertEquals(Transport.SEGMENTS, choose(charging = true, online = false))
 }
+
+class TransportPreferenceTest {
+    private val batteryLte = DeviceConditions(charging = false, unmeteredWifi = false, online = true)
+    private val charging = DeviceConditions(charging = true, unmeteredWifi = false, online = true)
+    private val offline = DeviceConditions(charging = true, unmeteredWifi = true, online = false)
+
+    @Test fun `always live overrides the battery rule`() =
+        assertEquals(Transport.LIVE, TransportPolicy.choose(batteryLte, TransportPreference.ALWAYS_LIVE))
+
+    @Test fun `always live still falls back to segments without a network`() =
+        assertEquals(Transport.SEGMENTS, TransportPolicy.choose(offline, TransportPreference.ALWAYS_LIVE))
+
+    @Test fun `always offline overrides the charger`() =
+        assertEquals(Transport.SEGMENTS, TransportPolicy.choose(charging, TransportPreference.ALWAYS_OFFLINE))
+
+    @Test fun `next cycles through all options`() {
+        assertEquals(TransportPreference.ALWAYS_LIVE, TransportPreference.AUTO.next())
+        assertEquals(TransportPreference.ALWAYS_OFFLINE, TransportPreference.ALWAYS_LIVE.next())
+        assertEquals(TransportPreference.AUTO, TransportPreference.ALWAYS_OFFLINE.next())
+    }
+}

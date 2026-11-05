@@ -24,4 +24,7 @@
     <string name="action_stop">Стоп</string>
     <string name="transport_live">⚡ Вживую</string>
     <string name="transport_segments">Офлайн</string>
+    <string name="transport_pref_auto">Режим: Авто</string>
+    <string name="transport_pref_live">Режим: Всегда вживую</string>
+    <string name="transport_pref_offline">Режим: Всегда офлайн</string>
 </resources>

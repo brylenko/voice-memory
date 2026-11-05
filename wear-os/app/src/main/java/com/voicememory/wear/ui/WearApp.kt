@@ -40,6 +40,8 @@ import com.voicememory.wear.assist.ConnectionStatus
 import com.voicememory.wear.memory.MemoryRecorderService
 import com.voicememory.wear.memory.MemoryStatus
 import com.voicememory.wear.memory.Transport
+import com.voicememory.wear.memory.TransportPreference
+import com.voicememory.wear.memory.TransportSettings
 
 private object Routes {
     const val HOME = "home"
@@ -98,6 +100,8 @@ private fun HomeScreen(
 ) {
     val context = LocalContext.current
     val memory by MemoryStatus.state.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { TransportSettings.load(context) }
+    val transportPref by TransportSettings.preference.collectAsStateWithLifecycle()
 
     WatchList {
         item {
@@ -130,6 +134,24 @@ private fun HomeScreen(
                     )
                 },
                 toggleControl = { Switch(checked = memory.running) },
+            )
+        }
+        item {
+            // Cycles Auto → Always live → Always offline; applies from the next conversation.
+            CompactChip(
+                onClick = { TransportSettings.set(context, transportPref.next()) },
+                label = {
+                    Text(
+                        stringResource(
+                            when (transportPref) {
+                                TransportPreference.AUTO -> R.string.transport_pref_auto
+                                TransportPreference.ALWAYS_LIVE -> R.string.transport_pref_live
+                                TransportPreference.ALWAYS_OFFLINE -> R.string.transport_pref_offline
+                            },
+                        ),
+                    )
+                },
+                colors = ChipDefaults.secondaryChipColors(),
             )
         }
         item {

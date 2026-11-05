@@ -25,4 +25,7 @@
     <string name="action_stop">Stop</string>
     <string name="transport_live">⚡ Live</string>
     <string name="transport_segments">Offline</string>
+    <string name="transport_pref_auto">Transport: Auto</string>
+    <string name="transport_pref_live">Transport: Always live</string>
+    <string name="transport_pref_offline">Transport: Always offline</string>
 </resources>

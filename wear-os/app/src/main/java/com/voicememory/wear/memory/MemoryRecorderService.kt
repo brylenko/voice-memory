@@ -29,6 +29,7 @@ import com.voicememory.wear.memory.sink.SegmentSink
 import com.voicememory.wear.ui.MainActivity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -57,8 +58,9 @@ class MemoryRecorderService : LifecycleService() {
         super.onCreate()
         store = SegmentStore(this)
         conditions = DeviceConditionsMonitor(this).also { it.start() }
-        conditions.state
-            .onEach { c -> MemoryStatus.update { it.copy(transport = TransportPolicy.choose(c)) } }
+        TransportSettings.load(this)
+        combine(conditions.state, TransportSettings.preference) { c, pref -> TransportPolicy.choose(c, pref) }
+            .onEach { t -> MemoryStatus.update { it.copy(transport = t) } }
             .launchIn(lifecycleScope)
     }
 
@@ -161,7 +163,7 @@ class MemoryRecorderService : LifecycleService() {
         // applicationContext: a live upload may settle after the service is gone.
         val upload: (File) -> Unit = { SegmentUploadWorker.enqueue(applicationContext, it) }
         val file = { onFinished: (File) -> Unit -> FileSegmentSink(store, SAMPLE_RATE, startedAtMs, onFinished) }
-        return when (TransportPolicy.choose(conditions.state.value)) {
+        return when (TransportPolicy.choose(conditions.state.value, TransportSettings.preference.value)) {
             Transport.SEGMENTS -> file(upload)
             Transport.LIVE -> {
                 val container = AppContainer.get(this)

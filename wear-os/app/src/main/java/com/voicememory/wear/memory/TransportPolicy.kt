@@ -21,6 +21,23 @@ data class DeviceConditions(
  * Evaluated once per conversation, so a conversation is never split between transports.
  */
 object TransportPolicy {
-    fun choose(c: DeviceConditions): Transport =
-        if (c.online && (c.charging || c.unmeteredWifi)) Transport.LIVE else Transport.SEGMENTS
+    /**
+     * [preference] overrides the automatic rule, with one safety exception:
+     * ALWAYS_LIVE without a network still records to segments — streaming into
+     * nothing would just lose the conversation.
+     */
+    fun choose(c: DeviceConditions, preference: TransportPreference = TransportPreference.AUTO): Transport =
+        when (preference) {
+            TransportPreference.ALWAYS_OFFLINE -> Transport.SEGMENTS
+            TransportPreference.ALWAYS_LIVE -> if (c.online) Transport.LIVE else Transport.SEGMENTS
+            TransportPreference.AUTO ->
+                if (c.online && (c.charging || c.unmeteredWifi)) Transport.LIVE else Transport.SEGMENTS
+        }
+}
+
+/** User's manual override from the watch UI. */
+enum class TransportPreference {
+    AUTO, ALWAYS_LIVE, ALWAYS_OFFLINE;
+
+    fun next(): TransportPreference = entries[(ordinal + 1) % entries.size]
 }
