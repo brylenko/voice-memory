@@ -12,6 +12,8 @@ object MemoryStatus {
         val paused: Boolean = false,
         val capturingSpeech: Boolean = false,
         val segmentsSaved: Int = 0,
+        /** Transport the *next* conversation will use (live stream vs. upload). */
+        val transport: Transport = Transport.SEGMENTS,
         val error: String? = null,
     )
 

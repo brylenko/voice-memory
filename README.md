@@ -111,9 +111,11 @@ _(Inspired by AI voice assistant concepts and meeting intelligence tools.)_
 
 A standalone Wear OS app (Galaxy Watch4+) with two modes — see [`wear-os/README.md`](wear-os/README.md):
 
-- **Memory** — listens all day, keeps only speech (on-device VAD), uploads
-  conversation-sized AAC segments through the existing two-phase upload flow
-  (`channel: "wear-os"`). `GET /api/memory/day` returns the day's notes plus an
+- **Memory** — listens all day, keeps only speech (on-device VAD). Hybrid transport,
+  chosen per conversation: on the charger / unmetered Wi-Fi it streams to
+  `WS /audio/live?channel=wear-live&vad=1` (text persisted utterance by utterance,
+  with a local AAC backup uploaded if the stream fails); otherwise it uploads
+  conversation-sized AAC segments via the two-phase flow (`channel: "wear-os"`). `GET /api/memory/day` returns the day's notes plus an
   LLM recap ("what did I hear today?").
 - **Assistant** — streams the mic to `WS /assist/live`; the server splits speech
   into utterances (Realtime API server VAD) and pushes short answers back in real

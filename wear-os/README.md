@@ -5,13 +5,33 @@ Standalone-приложение для Samsung Galaxy Watch4 и новее (Wear
 
 | Режим | Что делает | Как работает |
 |---|---|---|
-| **Память** | Слушает весь день и запоминает разговоры | Foreground-сервис → VAD (только речь) → AAC-сегменты ~«один разговор» → WorkManager → `POST /audio/upload-url` → PUT → `POST /audio/upload-complete` → бэкенд: транскрипция, саммари, теги, pgvector |
+| **Память** | Слушает весь день и запоминает разговоры | Foreground-сервис → VAD (только речь) → разговор уходит одним из двух транспортов (гибрид, см. ниже) → бэкенд: транскрипция, саммари, теги, pgvector |
 | **Ассистент** | Слушает и в реальном времени даёт короткие ответы на экране (и голосом в наушники) | Микрофон PCM16 24 кГц → WebSocket `/assist/live` → серверный VAD режет речь на фразы → LLM решает, нужен ли ответ, и стримит его → вибрация + текст (+ TTS) |
 | **Сегодня** | «Что я сегодня слышал» | `GET /api/memory/day` → список фрагментов + краткий итог дня от LLM |
 
 Ассистент учитывает и **личную память**: если спросить «когда мы договорились
 про демо?», он найдёт ответ в том, что часы слышали раньше (тот же
 pgvector-индекс, что и RAG-поиск).
+
+## Гибридный транспорт «Памяти»
+
+Транспорт выбирается **в начале каждого разговора** (`TransportPolicy`) и посреди
+разговора не меняется:
+
+| Условие | Транспорт | Что происходит |
+|---|---|---|
+| На зарядке **или** безлимитный Wi-Fi (и сеть есть) | ⚡ **Вживую** | Стрим в `WS /audio/live?channel=wear-live&vad=1`: сервер режет речь на фразы и сохраняет текст по ходу разговора. Параллельно пишется локальная AAC-копия |
+| Иначе (батарея + LTE/через телефон, офлайн) | **Офлайн** | AAC-файл → WorkManager → двухфазная загрузка, когда появится сеть |
+
+Надёжность стрима: копия удаляется только после `{"type":"done"}` от сервера.
+Обрыв, ошибка или таймаут (120 с) → копия уходит обычной загрузкой, разговор не
+теряется. (Если сервер успел сохранить часть, она останется как FAILED-трек и в
+«Сегодня» не попадёт.)
+
+Текущий транспорт виден на главном экране: «⚡ Вживую · N» / «Офлайн · N».
+
+> Wear OS часто отключает Wi-Fi, пока есть Bluetooth-связь с телефоном, — тогда
+> режим «Вживую» включается в основном на зарядке.
 
 ## Режимы ассистента
 
@@ -53,6 +73,8 @@ ui/            Compose for Wear: Home · Assistant · Today (MVVM, StateFlow)
 assist/        AssistSession (mic → WS), AssistEventReducer (чистый редьюсер протокола),
                AnswerFeedback (вибро + TTS)
 memory/        MemoryRecorderService (foreground, type=microphone, OngoingActivity),
+               TransportPolicy + DeviceConditionsMonitor (зарядка / Wi-Fi),
+               sink/: SegmentSink (Strategy) → FileSegmentSink | LiveSegmentSink (стрим + копия),
                SegmentStore (контракт имён файлов), SegmentUploadWorker (WorkManager)
 audio/         PcmRecorder (Flow<ShortArray>), VoiceActivityDetector, SegmentPolicy,
                AacFileEncoder (MediaCodec → .m4a)
@@ -61,7 +83,7 @@ net/           VoiceMemoryApi (Facade над REST/WS)
 AppContainer   ручной DI / composition root
 ```
 
-Чистая логика (`SegmentPolicy`, `VoiceActivityDetector`, `DeviceSigner`,
+Чистая логика (`SegmentPolicy`, `TransportPolicy`, `VoiceActivityDetector`, `DeviceSigner`,
 `AssistEventReducer`) не зависит от Android и покрыта JVM-тестами; тест
 `DeviceSignerTest` использует векторы, посчитанные Node `crypto`, — гарантия
 совместимости подписи с бэкендом.

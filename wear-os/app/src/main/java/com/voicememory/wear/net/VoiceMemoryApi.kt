@@ -99,6 +99,17 @@ class VoiceMemoryApi(
         return http.newWebSocket(Request.Builder().url(url).build(), listener)
     }
 
+    /** Opens /audio/live for memory mode: utterance-level persistence while talking. */
+    fun openLiveTranscription(language: String?, listener: WebSocketListener): WebSocket {
+        val url = "$baseUrl/audio/live".toHttpUrl().newBuilder().apply {
+            signer.wsQuery().forEach { (k, v) -> addQueryParameter(k, v) }
+            addQueryParameter("channel", "wear-live")
+            addQueryParameter("vad", "1")
+            if (language != null) addQueryParameter("lang", language)
+        }.build()
+        return http.newWebSocket(Request.Builder().url(url).build(), listener)
+    }
+
     private fun postJson(path: String, body: JSONObject): JSONObject {
         val req = Request.Builder()
             .url(baseUrl + path)

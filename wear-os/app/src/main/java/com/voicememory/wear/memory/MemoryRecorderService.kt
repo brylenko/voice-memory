@@ -19,32 +19,47 @@ import androidx.lifecycle.lifecycleScope
 import androidx.wear.ongoing.OngoingActivity
 import androidx.wear.ongoing.Status
 import com.voicememory.wear.R
-import com.voicememory.wear.audio.AacFileEncoder
+import com.voicememory.wear.AppContainer
 import com.voicememory.wear.audio.PcmRecorder
 import com.voicememory.wear.audio.SegmentPolicy
 import com.voicememory.wear.audio.VoiceActivityDetector
+import com.voicememory.wear.memory.sink.FileSegmentSink
+import com.voicememory.wear.memory.sink.LiveSegmentSink
+import com.voicememory.wear.memory.sink.SegmentSink
 import com.voicememory.wear.ui.MainActivity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import java.io.File
 
 /**
  * "Memory" mode: listens all day in a foreground service, keeps only the
- * parts with speech, cuts them into conversation-sized AAC segments and hands
- * each one to WorkManager for upload. The backend transcribes, summarizes and
- * indexes them, so later you can ask "what did we agree on at lunch?".
+ * parts with speech and cuts them into conversation-sized pieces. Each
+ * conversation goes to the backend by one of two transports (hybrid):
+ *  - LIVE     — on the charger or unmetered Wi-Fi: streamed to /audio/live,
+ *               saved utterance by utterance in real time (with a local backup)
+ *  - SEGMENTS — otherwise: AAC file, uploaded by WorkManager when possible
+ * The backend transcribes, summarizes and indexes everything, so later you can
+ * ask "what did we agree on at lunch?".
  *
  * Commands: START, STOP, PAUSE (free the mic for assistant mode), RESUME.
  */
 class MemoryRecorderService : LifecycleService() {
 
     private lateinit var store: SegmentStore
+    private lateinit var conditions: DeviceConditionsMonitor
     private var captureJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
         store = SegmentStore(this)
+        conditions = DeviceConditionsMonitor(this).also { it.start() }
+        conditions.state
+            .onEach { c -> MemoryStatus.update { it.copy(transport = TransportPolicy.choose(c)) } }
+            .launchIn(lifecycleScope)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -94,18 +109,17 @@ class MemoryRecorderService : LifecycleService() {
         val policy = SegmentPolicy()
         // Pre-roll: keep the last ~0.6 s so the first syllable of a sentence isn't lost.
         val preRoll = ArrayDeque<ShortArray>()
-        var encoder: AacFileEncoder? = null
+        var sink: SegmentSink? = null
 
         fun closeSegment(keep: Boolean) {
-            val enc = encoder ?: return
-            encoder = null
+            val current = sink ?: return
+            sink = null
             MemoryStatus.update { it.copy(capturingSpeech = false) }
-            if (!keep) { enc.abort(); return }
-            val duration = enc.durationSeconds
-            val done = store.complete(enc.finish(), duration)
-            SegmentUploadWorker.enqueue(this, done)
-            MemoryStatus.update { it.copy(segmentsSaved = it.segmentsSaved + 1) }
-            updateNotification()
+            current.close(keep)
+            if (keep) {
+                MemoryStatus.update { it.copy(segmentsSaved = it.segmentsSaved + 1) }
+                updateNotification()
+            }
         }
 
         try {
@@ -113,13 +127,14 @@ class MemoryRecorderService : LifecycleService() {
                 val speech = vad.isSpeech(frame)
                 when (val action = policy.onFrame(System.currentTimeMillis(), FRAME_MS, speech)) {
                     SegmentPolicy.Action.Open -> {
-                        encoder = AacFileEncoder(store.newPartFile(System.currentTimeMillis()), SAMPLE_RATE)
-                            .also { enc -> preRoll.forEach(enc::encode) }
+                        sink = openSink(System.currentTimeMillis()).also { s ->
+                            preRoll.forEach(s::write)
+                            s.write(frame)
+                        }
                         preRoll.clear()
-                        encoder?.encode(frame)
                         MemoryStatus.update { it.copy(capturingSpeech = true) }
                     }
-                    SegmentPolicy.Action.Write -> encoder?.encode(frame)
+                    SegmentPolicy.Action.Write -> sink?.write(frame)
                     is SegmentPolicy.Action.Close -> closeSegment(action.keep)
                     SegmentPolicy.Action.None -> {
                         if (!policy.isOpen) {
@@ -141,6 +156,20 @@ class MemoryRecorderService : LifecycleService() {
         }
     }
 
+    /** Transport is chosen once per conversation, never switched mid-way. */
+    private fun openSink(startedAtMs: Long): SegmentSink {
+        // applicationContext: a live upload may settle after the service is gone.
+        val upload: (File) -> Unit = { SegmentUploadWorker.enqueue(applicationContext, it) }
+        val file = { onFinished: (File) -> Unit -> FileSegmentSink(store, SAMPLE_RATE, startedAtMs, onFinished) }
+        return when (TransportPolicy.choose(conditions.state.value)) {
+            Transport.SEGMENTS -> file(upload)
+            Transport.LIVE -> {
+                val container = AppContainer.get(this)
+                LiveSegmentSink(container.api, file, container.language, upload)
+            }
+        }
+    }
+
     private fun stopEverything() {
         captureJob?.cancel()
         captureJob = null
@@ -151,6 +180,7 @@ class MemoryRecorderService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        conditions.stop()
         releaseWakeLock()
         MemoryStatus.update { it.copy(running = false, capturingSpeech = false) }
         super.onDestroy()
@@ -217,7 +247,7 @@ class MemoryRecorderService : LifecycleService() {
         private const val TAG = "MemoryRecorder"
         private const val CHANNEL_ID = "memory"
         private const val NOTIFICATION_ID = 42
-        private const val SAMPLE_RATE = 16_000
+        private const val SAMPLE_RATE = 24_000 // = /audio/live contract; also fine for AAC
         private const val FRAME_MS = 30
         private const val PRE_ROLL_FRAMES = 20
 

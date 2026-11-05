@@ -22,4 +22,6 @@
     <string name="notif_memory_title">Voice Memory слухає</string>
     <string name="notif_memory_text">Збережено фрагментів сьогодні: %1$d</string>
     <string name="action_stop">Стоп</string>
+    <string name="transport_live">⚡ Наживо</string>
+    <string name="transport_segments">Офлайн</string>
 </resources>

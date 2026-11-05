@@ -39,6 +39,7 @@ import com.voicememory.wear.assist.AssistMode
 import com.voicememory.wear.assist.ConnectionStatus
 import com.voicememory.wear.memory.MemoryRecorderService
 import com.voicememory.wear.memory.MemoryStatus
+import com.voicememory.wear.memory.Transport
 
 private object Routes {
     const val HOME = "home"
@@ -117,8 +118,13 @@ private fun HomeScreen(
                     Text(
                         when {
                             memory.error != null -> memory.error!!
-                            memory.running && memory.capturingSpeech -> "● " + stringResource(R.string.memory_on)
-                            memory.running -> stringResource(R.string.memory_on) + " · ${memory.segmentsSaved}"
+                            memory.running -> {
+                                val dot = if (memory.capturingSpeech) "● " else ""
+                                val via = stringResource(
+                                    if (memory.transport == Transport.LIVE) R.string.transport_live else R.string.transport_segments,
+                                )
+                                "$dot$via · ${memory.segmentsSaved}"
+                            }
                             else -> stringResource(R.string.memory_off)
                         },
                     )

@@ -13,7 +13,12 @@ import {
   STREAMING_TRANSCRIPTION_PORT,
   StreamingTranscriptionPort,
 } from '../ai/ports/streaming-transcription.port';
+import {
+  UTTERANCE_TRANSCRIPTION_PORT,
+  UtteranceTranscriptionPort,
+} from '../ai/ports/utterance-transcription.port';
 import { DeviceUserResolver } from '../user/device-user.resolver';
+import { finalUtterancesAsDeltas, LiveSessionOptions, parseLiveSessionOptions } from './live-session-options';
 import { LiveTrackService } from './live-track.service';
 import { WsHmacAuthService, WsAuthError } from './ws-hmac-auth.service';
 
@@ -42,6 +47,9 @@ type ServerEvent = TranscriptDelta | DoneEvent | ErrorEvent;
  *
  * Optional query params:
  *   lang      — BCP-47 language hint, e.g. "uk", "en"
+ *   channel   — "web-live" (default) | "wear-live" — stored on the track
+ *   vad=1     — split speech into utterances server-side; text is persisted
+ *               utterance by utterance during the session instead of only at the end
  */
 @WebSocketGateway({ path: '/audio/live' })
 export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -54,6 +62,8 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
   constructor(
     @Inject(STREAMING_TRANSCRIPTION_PORT)
     private readonly streaming: StreamingTranscriptionPort,
+    @Inject(UTTERANCE_TRANSCRIPTION_PORT)
+    private readonly utterances: UtteranceTranscriptionPort,
     private readonly users: DeviceUserResolver,
     private readonly liveTracks: LiveTrackService,
     private readonly wsAuth: WsHmacAuthService,
@@ -61,7 +71,7 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   handleConnection(client: WebSocket, req: IncomingMessage) {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
-    const lang = url.searchParams.get('lang') ?? undefined;
+    const options = parseLiveSessionOptions(url.searchParams);
 
     // Validate HMAC credentials before doing anything else.
     // Uses the same scheme as HTTP DeviceAuthGuard: HMAC-SHA256(deviceId.ts.nonce, secret).
@@ -112,7 +122,7 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
               authState = 'authorized';
               for (const frame of pendingFrames) audioPassthrough.push(frame);
               pendingFrames.length = 0;
-              void this.runSession(client, audioPassthrough, deltas, userId, lang);
+              void this.runSession(client, audioPassthrough, deltas, userId, options);
             }).catch((err: Error) => {
               authState = 'rejected';
               pendingFrames.length = 0;
@@ -149,19 +159,19 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
     audioStream: Readable,
     deltas: string[],
     userId: string,
-    lang: string | undefined,
+    options: LiveSessionOptions,
   ): Promise<void> {
     if (!userId) return;
 
     // Create track immediately so partial text is never lost
-    const trackId = await this.liveTracks.start(userId, 'web-live');
+    const trackId = await this.liveTracks.start(userId, options.channel);
     this.logger.log(`[${trackId}] live session started`);
 
     const FLUSH_EVERY = 200; // chars
     let unflushedChars = 0;
 
     try {
-      for await (const delta of this.streaming.transcribeStream(audioStream, { language: lang })) {
+      for await (const delta of this.transcripts(audioStream, options)) {
         deltas.push(delta);
         unflushedChars += delta.length;
         this.send(client, { type: 'transcript', text: delta });
@@ -185,6 +195,13 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.logger.error('Streaming transcription error', err as Error);
       this.send(client, { type: 'error', message: (err as Error).message });
     }
+  }
+
+  /** Strategy: one long transcript (default) or utterance-by-utterance (vad=1). */
+  private transcripts(audio: Readable, options: LiveSessionOptions): AsyncIterable<string> {
+    return options.vad
+      ? finalUtterancesAsDeltas(this.utterances.transcribeUtterances(audio, { language: options.language }))
+      : this.streaming.transcribeStream(audio, { language: options.language });
   }
 
   private send(client: WebSocket, event: ServerEvent): void {
