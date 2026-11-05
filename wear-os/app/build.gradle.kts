@@ -30,6 +30,18 @@ android {
         buildConfigField("String", "LANGUAGE", "\"${cfg("voicememory.language", "VOICEMEMORY_LANGUAGE")}\"")
     }
 
+    signingConfigs {
+        // Committed on purpose: a *debug* key (standard android/android credentials, not a secret).
+        // Without it every CI run signs with a fresh random key and `adb install -r` fails with
+        // INSTALL_FAILED_UPDATE_INCOMPATIBLE. Never use it for release builds.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
