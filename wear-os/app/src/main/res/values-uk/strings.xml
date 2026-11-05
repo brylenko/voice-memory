@@ -27,4 +27,5 @@
     <string name="transport_pref_auto">Режим: Авто</string>
     <string name="transport_pref_live">Режим: Завжди наживо</string>
     <string name="transport_pref_offline">Режим: Завжди офлайн</string>
+    <string name="now">зараз</string>
 </resources>

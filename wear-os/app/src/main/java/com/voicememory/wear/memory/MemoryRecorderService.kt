@@ -170,7 +170,9 @@ class MemoryRecorderService : LifecycleService() {
             Transport.SEGMENTS -> file(upload)
             Transport.LIVE -> {
                 val container = AppContainer.get(this)
-                LiveSegmentSink(container.api, file, container.language, upload)
+                LiveSegmentSink(container.api, file, container.language, upload) { heard ->
+                    MemoryStatus.update { it.copy(lastHeard = heard) }
+                }
             }
         }
     }

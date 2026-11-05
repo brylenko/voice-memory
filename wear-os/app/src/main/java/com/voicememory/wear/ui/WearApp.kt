@@ -136,6 +136,18 @@ private fun HomeScreen(
                 toggleControl = { Switch(checked = memory.running) },
             )
         }
+        memory.lastHeard?.takeIf { memory.running }?.let { heard ->
+            item {
+                Text(
+                    text = "«$heard»",
+                    style = MaterialTheme.typography.caption2,
+                    color = MaterialTheme.colors.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                )
+            }
+        }
         item {
             // Cycles Auto → Always live → Always offline; applies from the next conversation.
             CompactChip(
@@ -285,7 +297,9 @@ private fun TodayScreen(vm: TodayViewModel = viewModel()) {
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {},
                         label = { Text(item.summary, maxLines = 3) },
-                        secondaryLabel = { Text(localTime(item.at)) },
+                        secondaryLabel = {
+                            Text(if (item.live) "● " + stringResource(R.string.now) else localTime(item.at))
+                        },
                         colors = ChipDefaults.secondaryChipColors(),
                     )
                 }

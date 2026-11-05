@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, Repository } from 'typeorm';
+import { Between, In, Repository } from 'typeorm';
 import { CHAT_COMPLETION_PORT, ChatCompletionPort } from '../ai/ports/chat-completion.port';
 import { AudioTrackEntity, AudioTrackStatus } from '../audio-track/audio-track.entity';
 import { EncryptionService } from '../common/services/encryption.service';
@@ -13,6 +13,8 @@ export interface DayMemoryItem {
   channel: string;
   tags: string[];
   summary: string;
+  /** Conversation still being recorded (live stream): summary is the latest transcript tail. */
+  live: boolean;
 }
 
 export interface DayMemory {
@@ -23,6 +25,8 @@ export interface DayMemory {
 }
 
 const ITEM_SUMMARY_CHARS = 400;
+/** Recap of completed recordings is cached so the watch can poll every few seconds cheaply. */
+const DIGEST_CACHE_MAX = 500;
 const DIGEST_INPUT_CHARS = 12_000;
 
 const DIGEST_PROMPT =
@@ -34,6 +38,8 @@ const DIGEST_PROMPT =
 /** "What did I hear today?" — per-recording notes plus one LLM recap. */
 @Injectable()
 export class DayDigestService {
+  private readonly digestCache = new Map<string, string | null>();
+
   constructor(
     @InjectRepository(AudioTrackEntity) private readonly tracks: Repository<AudioTrackEntity>,
     @Inject(CHAT_COMPLETION_PORT) private readonly chat: ChatCompletionPort,
@@ -45,7 +51,8 @@ export class DayDigestService {
     const rows = await this.tracks.find({
       where: {
         userId,
-        status: AudioTrackStatus.COMPLETED,
+        // PROCESSING = live conversation in progress (or a file still being transcribed).
+        status: In([AudioTrackStatus.COMPLETED, AudioTrackStatus.PROCESSING]),
         createdAt: Between(window.from, new Date(window.to.getTime() - 1)),
       },
       order: { createdAt: 'ASC' },
@@ -56,11 +63,24 @@ export class DayDigestService {
       .map((t) => toItem(t))
       .filter((i) => i.summary.length > 0);
 
-    return { date: window.date, items, digest: await this.digest(items) };
+    const completed = items.filter((i) => !i.live);
+    return { date: window.date, items, digest: await this.cachedDigest(userId, window.date, completed) };
+  }
+
+  /** The recap only changes when a recording completes → key it by the completed track ids. */
+  private async cachedDigest(userId: string, date: string, items: DayMemoryItem[]): Promise<string | null> {
+    if (items.length === 0) return null;
+    const key = `${userId}|${date}|${items.map((i) => i.trackId).join(',')}`;
+    if (this.digestCache.has(key)) return this.digestCache.get(key)!;
+    const digest = await this.digest(items);
+    if (this.digestCache.size >= DIGEST_CACHE_MAX) {
+      this.digestCache.delete(this.digestCache.keys().next().value as string);
+    }
+    this.digestCache.set(key, digest);
+    return digest;
   }
 
   private async digest(items: DayMemoryItem[]): Promise<string | null> {
-    if (items.length === 0) return null;
     let notes = '';
     for (const i of items) {
       const line = `[${i.at.toISOString().slice(11, 16)} UTC] ${i.summary}\n`;
@@ -79,11 +99,14 @@ export class DayDigestService {
 }
 
 function toItem(t: AudioTrackEntity): DayMemoryItem {
-  const executive = t.summaries?.executive?.trim();
-  const fallback = (t.fullText ?? '').trim();
-  const summary = executive || (fallback.length > ITEM_SUMMARY_CHARS
-    ? `${fallback.slice(0, ITEM_SUMMARY_CHARS)}…`
-    : fallback);
+  const live = t.status === AudioTrackStatus.PROCESSING;
+  const executive = live ? undefined : t.summaries?.executive?.trim();
+  const text = (t.fullText ?? '').trim();
+  // Live: show the *latest* words; finished: the beginning reads better as a fallback summary.
+  const fallback = text.length <= ITEM_SUMMARY_CHARS
+    ? text
+    : live ? `…${text.slice(-ITEM_SUMMARY_CHARS)}` : `${text.slice(0, ITEM_SUMMARY_CHARS)}…`;
+  const summary = executive || fallback;
   return {
     trackId: t.id,
     at: t.createdAt,
@@ -91,5 +114,6 @@ function toItem(t: AudioTrackEntity): DayMemoryItem {
     channel: t.channel,
     tags: t.tags ?? [],
     summary,
+    live,
   };
 }

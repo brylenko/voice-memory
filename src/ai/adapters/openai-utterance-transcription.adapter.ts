@@ -24,9 +24,13 @@ const DRAIN_TIMEOUT_MS = 5_000;
 export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscriptionPort {
   private readonly logger = new Logger(OpenAiUtteranceTranscriptionAdapter.name);
   private readonly apiKey: string;
+  private readonly model: string;
 
   constructor(config: ConfigService) {
     this.apiKey = config.get<string>('openaiApiKey') ?? '';
+    // Must be a model that supports server-side turn detection: gpt-realtime-whisper
+    // rejects `turn_detection` ("Turn detection is not supported for this transcription model").
+    this.model = config.get<string>('realtimeVadTranscriptionModel') ?? 'gpt-4o-transcribe';
   }
 
   transcribeUtterances(
@@ -79,7 +83,7 @@ export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscripti
               format: { type: 'audio/pcm', rate: 24000 },
               noise_reduction: { type: 'far_field' },
               transcription: {
-                model: 'gpt-realtime-whisper',
+                model: this.model,
                 ...(options.language ? { language: options.language } : {}),
               },
               turn_detection: {

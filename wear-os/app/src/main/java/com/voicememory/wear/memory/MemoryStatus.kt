@@ -14,6 +14,8 @@ object MemoryStatus {
         val segmentsSaved: Int = 0,
         /** Transport the *next* conversation will use (live stream vs. upload). */
         val transport: Transport = Transport.SEGMENTS,
+        /** Latest utterance the server transcribed (live transport only) — shown on the home screen. */
+        val lastHeard: String? = null,
         val error: String? = null,
     )
 

@@ -176,7 +176,8 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
         unflushedChars += delta.length;
         this.send(client, { type: 'transcript', text: delta });
 
-        if (unflushedChars >= FLUSH_EVERY) {
+        // vad=1: each delta is a whole utterance → persist immediately so it is visible in real time.
+        if (options.vad || unflushedChars >= FLUSH_EVERY) {
           unflushedChars = 0;
           this.liveTracks.savePartial(trackId, deltas.join('')).catch((err: Error) =>
             this.logger.error(`[${trackId}] partial text flush failed: ${err.message}`),

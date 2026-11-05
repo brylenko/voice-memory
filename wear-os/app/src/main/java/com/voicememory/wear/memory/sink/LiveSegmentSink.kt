@@ -28,6 +28,8 @@ class LiveSegmentSink(
     private val backup: (onFinished: (File) -> Unit) -> FileSegmentSink,
     language: String?,
     private val uploadBackup: (File) -> Unit,
+    /** Each utterance as soon as the server has transcribed it. */
+    private val onHeard: (String) -> Unit = {},
 ) : SegmentSink {
     private val settled = AtomicBoolean(false)
     @Volatile private var backupFile: File? = null
@@ -37,7 +39,9 @@ class LiveSegmentSink(
 
     private val socket: WebSocket = api.openLiveTranscription(language, listener = object : WebSocketListener() {
         override fun onMessage(webSocket: WebSocket, text: String) {
-            when (runCatching { JSONObject(text).optString("type") }.getOrNull()) {
+            val json = runCatching { JSONObject(text) }.getOrNull() ?: return
+            when (json.optString("type")) {
+                "transcript" -> json.optString("text").trim().takeIf { it.isNotEmpty() }?.let(onHeard)
                 "done" -> serverDone(true)
                 "error" -> serverDone(false)
             }

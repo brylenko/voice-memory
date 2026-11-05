@@ -15,6 +15,9 @@ export default () => ({
     port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
   },
   openaiApiKey: process.env.OPENAI_API_KEY ?? '',
+  // Realtime transcription model for utterance segmentation (server VAD): /assist/live and /audio/live?vad=1.
+  // Must support turn detection — gpt-realtime-whisper does not.
+  realtimeVadTranscriptionModel: process.env.REALTIME_VAD_TRANSCRIPTION_MODEL ?? 'gpt-4o-transcribe',
   // 64 hex chars = 32 bytes = AES-256 key. Leave empty to disable field encryption (dev only).
   encryptionKey: process.env.ENCRYPTION_KEY ?? '',
   device: {

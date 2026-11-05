@@ -21,7 +21,7 @@ class ApiException(val code: Int, message: String) : IOException(message) {
     val isPermanent: Boolean get() = code in 400..499 && code != 408 && code != 429
 }
 
-data class DayItem(val at: String, val summary: String, val tags: List<String>)
+data class DayItem(val at: String, val summary: String, val tags: List<String>, val live: Boolean)
 data class DayMemory(val date: String, val digest: String?, val items: List<DayItem>)
 
 /** Thin facade over the backend REST + WebSocket endpoints (Facade pattern). */
@@ -77,6 +77,7 @@ class VoiceMemoryApi(
                     at = it.getString("at"),
                     summary = it.getString("summary"),
                     tags = List(tags?.length() ?: 0) { t -> tags!!.getString(t) },
+                    live = it.optBoolean("live", false),
                 )
             },
         )
