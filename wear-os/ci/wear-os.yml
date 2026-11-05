@@ -1,0 +1,56 @@
+# Ready-to-use GitHub Actions workflow. Move to .github/workflows/wear-os.yml to enable
+# (the automation token used to create this PR may not edit workflow files).
+name: Wear OS app
+
+on:
+  push:
+    branches: [main]
+    paths: ['wear-os/**', '.github/workflows/wear-os.yml']
+  pull_request:
+    paths: ['wear-os/**', '.github/workflows/wear-os.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Unit tests & debug APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: wear-os
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Android SDK is preinstalled on ubuntu-latest (ANDROID_HOME); this adds Gradle caching.
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+      - name: Build debug APK
+        # Placeholder backend config: the CI APK is for UI smoke tests only.
+        # For a working build put real values in local.properties (see local.properties.example).
+        env:
+          VOICEMEMORY_BASE_URL: http://10.0.2.2:3000
+          VOICEMEMORY_HMAC_SECRET: ci-placeholder
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: voice-memory-wear-debug-apk
+          path: wear-os/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wear-os-test-reports
+          path: wear-os/app/build/reports/tests/
+          if-no-files-found: ignore
