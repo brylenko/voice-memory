@@ -132,7 +132,11 @@ class MemoryRecorderService : LifecycleService() {
                 val speech = vad.isSpeech(frame)
                 when (val action = policy.onFrame(System.currentTimeMillis(), FRAME_MS, speech)) {
                     SegmentPolicy.Action.Open -> {
-                        sink = openSink(System.currentTimeMillis()).also { s ->
+                        val (opened, transport) = openSink(System.currentTimeMillis())
+                        policy.useLimits(
+                            if (transport == Transport.LIVE) SegmentPolicy.Limits.LIVE else SegmentPolicy.Limits.OFFLINE,
+                        )
+                        sink = opened.also { s ->
                             preRoll.forEach(s::write)
                             s.write(frame)
                         }
@@ -162,17 +166,18 @@ class MemoryRecorderService : LifecycleService() {
     }
 
     /** Transport is chosen once per conversation, never switched mid-way. */
-    private fun openSink(startedAtMs: Long): SegmentSink {
+    private fun openSink(startedAtMs: Long): Pair<SegmentSink, Transport> {
         // applicationContext: a live upload may settle after the service is gone.
         val upload: (File) -> Unit = { SegmentUploadWorker.enqueue(applicationContext, it) }
         val file = { onFinished: (File) -> Unit -> FileSegmentSink(store, SAMPLE_RATE, startedAtMs, onFinished) }
-        return when (TransportPolicy.choose(conditions.state.value, TransportSettings.preference.value)) {
-            Transport.SEGMENTS -> file(upload)
+        val transport = TransportPolicy.choose(conditions.state.value, TransportSettings.preference.value)
+        return when (transport) {
+            Transport.SEGMENTS -> file(upload) to transport
             Transport.LIVE -> {
                 val container = AppContainer.get(this)
                 LiveSegmentSink(container.api, file, container.language, upload) { heard ->
                     MemoryStatus.update { it.copy(lastHeard = heard) }
-                }
+                } to transport
             }
         }
     }

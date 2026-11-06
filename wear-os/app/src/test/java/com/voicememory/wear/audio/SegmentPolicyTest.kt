@@ -37,3 +37,24 @@ class SegmentPolicyTest {
         assertEquals(SegmentPolicy.Action.Close(keep = true), p.flush())
     }
 }
+
+class SegmentPolicyLimitsTest {
+    @Test fun `offline limits cut segments after one minute of speech`() {
+        val p = SegmentPolicy()
+        p.onFrame(0, 30, true)
+        p.useLimits(SegmentPolicy.Limits.OFFLINE)
+        var t = 0L
+        var action: SegmentPolicy.Action = SegmentPolicy.Action.None
+        while (t < 120_000 && action !is SegmentPolicy.Action.Close) { t += 30; action = p.onFrame(t, 30, true) }
+        assertEquals(SegmentPolicy.Action.Close(keep = true), action)
+        org.junit.Assert.assertTrue("closed at ${t}ms", t in 59_000..61_000)
+    }
+
+    @Test fun `offline limits close after 15 s of silence`() {
+        val p = SegmentPolicy(minVoicedMs = 0)
+        p.onFrame(0, 30, true)
+        p.useLimits(SegmentPolicy.Limits.OFFLINE)
+        assertEquals(SegmentPolicy.Action.None, p.onFrame(14_000, 30, false))
+        assertEquals(SegmentPolicy.Action.Close(keep = true), p.onFrame(15_100, 30, false))
+    }
+}

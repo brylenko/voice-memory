@@ -8,11 +8,11 @@ package com.voicememory.wear.audio
  */
 class SegmentPolicy(
     /** Cap on speech per segment — keeps uploads small and transcription latency low. */
-    private val maxVoicedMs: Long = 5 * 60_000L,
+    private var maxVoicedMs: Long = 5 * 60_000L,
     /** This much silence means the conversation is over → close the segment. */
-    private val closeAfterSilenceMs: Long = 45_000L,
+    private var closeAfterSilenceMs: Long = 45_000L,
     /** Hard cap on wall-clock time a segment may stay open. */
-    private val maxOpenMs: Long = 15 * 60_000L,
+    private var maxOpenMs: Long = 15 * 60_000L,
     /** Segments with less speech than this are just noise (cough, door) → discard. */
     val minVoicedMs: Long = 3_000L,
 ) {
@@ -22,6 +22,22 @@ class SegmentPolicy(
         private set
     private var openedAt = 0L
     private var lastSpeechAt = 0L
+
+    /** Limits for the segment that is currently open (chosen once the transport is known). */
+    data class Limits(val maxVoicedMs: Long, val closeAfterSilenceMs: Long, val maxOpenMs: Long) {
+        companion object {
+            /** Live stream: text is saved per utterance anyway, so a segment can span a whole conversation. */
+            val LIVE = Limits(maxVoicedMs = 5 * 60_000L, closeAfterSilenceMs = 45_000L, maxOpenMs = 15 * 60_000L)
+            /** Offline file: latency = segment length, so keep segments short. */
+            val OFFLINE = Limits(maxVoicedMs = 60_000L, closeAfterSilenceMs = 15_000L, maxOpenMs = 3 * 60_000L)
+        }
+    }
+
+    fun useLimits(limits: Limits) {
+        maxVoicedMs = limits.maxVoicedMs
+        closeAfterSilenceMs = limits.closeAfterSilenceMs
+        maxOpenMs = limits.maxOpenMs
+    }
 
     sealed interface Action {
         data object None : Action

@@ -10,7 +10,8 @@ object TransportSettings {
     private const val PREFS = "memory_settings"
     private const val KEY = "transport_preference"
 
-    private val _preference = MutableStateFlow(TransportPreference.AUTO)
+    // Default: real time. Without a network TransportPolicy still falls back to offline segments.
+    private val _preference = MutableStateFlow(TransportPreference.ALWAYS_LIVE)
     val preference: StateFlow<TransportPreference> = _preference.asStateFlow()
 
     @Volatile private var loaded = false
@@ -18,7 +19,7 @@ object TransportSettings {
     fun load(context: Context) {
         if (loaded) return
         val raw = prefs(context).getString(KEY, null)
-        _preference.value = TransportPreference.entries.firstOrNull { it.name == raw } ?: TransportPreference.AUTO
+        _preference.value = TransportPreference.entries.firstOrNull { it.name == raw } ?: TransportPreference.ALWAYS_LIVE
         loaded = true
     }
 
