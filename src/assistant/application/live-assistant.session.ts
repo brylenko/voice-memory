@@ -6,6 +6,9 @@ import { buildAssistantMessages, MAX_ANSWER_CHARS } from './assistant-prompt';
 import { ConversationWindow } from './conversation-window';
 import { EchoGuard } from './echo-guard';
 import type { AssistantTopicId } from './assistant-topic';
+import { currentRequestStart } from './assistant-prompt';
+import { detectMemoryIntent } from './memory-intent';
+import type { MemoryRecallPort } from './ports/memory-recall.port';
 import { stripDeltaMarkup, toPlainText } from './plain-text';
 import type { MemoryContextPort, MemoryFact } from './ports/memory-context.port';
 
@@ -24,6 +27,8 @@ export type AssistantEvent =
 export interface LiveAssistantDeps {
   chat: ChatStreamPort;
   memory: MemoryContextPort | null;
+  /** Date-aware recall for explicit questions about the user's past conversations. */
+  recall?: MemoryRecallPort | null;
   log?: (msg: string) => void;
   /** Decision trace (skip / answer), for diagnostics. Never receives user text. */
   trace?: (msg: string) => void;
@@ -38,6 +43,8 @@ export interface LiveAssistantContext {
   mode: AssistantMode;
   memoryFacts?: number;
   topic?: AssistantTopicId;
+  /** Watch UTC offset in minutes (local times in answers, "today" boundaries). */
+  tzOffsetMinutes?: number;
 }
 
 /**
@@ -150,12 +157,29 @@ export class LiveAssistantSession {
     let answer = '';
 
     try {
-      const memory = await this.lookupMemory(latest.text);
+      const conversation = this.window.snapshot();
+      const request = conversation.slice(currentRequestStart(conversation)).map((u) => u.text).join(' ');
+      const intent = this.deps.recall ? detectMemoryIntent(request) : 'none';
+
+      let memory: MemoryFact[];
+      let daySummary: string | null = null;
+      if (intent !== 'none') {
+        this.deps.trace?.(`memory question (${intent})`);
+        const recalled = await this.recallMemory(request, intent === 'today');
+        memory = recalled.facts;
+        daySummary = recalled.daySummary;
+      } else {
+        memory = await this.lookupMemory(latest.text);
+      }
+
       const messages = buildAssistantMessages({
-        conversation: this.window.snapshot(),
+        conversation,
         memory,
         forced,
         topic: this.topic,
+        memoryQuestion: intent !== 'none',
+        daySummary,
+        tzOffsetMinutes: this.ctx.tzOffsetMinutes ?? 0,
       });
 
       const gated = await gateAnswer(this.deps.chat.stream(messages, { temperature: 0.3 }));
@@ -193,6 +217,19 @@ export class LiveAssistantSession {
           ...(code ? { code } : {}),
         });
       }
+    }
+  }
+
+  private async recallMemory(request: string, includeDay: boolean): Promise<{ facts: MemoryFact[]; daySummary: string | null }> {
+    try {
+      const r = await this.deps.recall!.recall(this.ctx.userId, request, {
+        includeDay,
+        tzOffsetMinutes: this.ctx.tzOffsetMinutes ?? 0,
+      });
+      return { facts: r.facts, daySummary: r.daySummary ?? null };
+    } catch (err) {
+      this.deps.log?.(`memory recall failed: ${(err as Error).message}`);
+      return { facts: [], daySummary: null };
     }
   }
 

@@ -10,5 +10,6 @@ import { MemoryController } from './memory.controller';
   imports: [UserModule, TypeOrmModule.forFeature([AudioTrackEntity])],
   controllers: [MemoryController],
   providers: [DayDigestService, DeviceAuthGuard],
+  exports: [DayDigestService],
 })
 export class MemoryModule {}

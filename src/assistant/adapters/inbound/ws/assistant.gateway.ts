@@ -68,7 +68,8 @@ const MAX_PENDING_BYTES = 24_000 * 2 * 10;
  *   {"type":"error","message","paymentUrl"?}
  *
  * Query params: HMAC auth (deviceId, ts, nonce, sig — see WsHmacAuthService) plus
- *   mode=auto|manual (default auto), lang=<BCP-47>, save=1 to store the transcript in memory.
+ *   mode=auto|manual (default auto), lang=<BCP-47>, save=1 to store the transcript in memory,
+ *   topic=<preset>, tz=<UTC offset minutes> (local times and "today" for memory questions).
  */
 @WebSocketGateway({ path: '/assist/live' })
 export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -105,6 +106,8 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
     const lang = url.searchParams.get('lang') ?? undefined;
     const save = url.searchParams.get('save') === '1';
     const topic = parseTopic(url.searchParams.get('topic'));
+    const tzRaw = Number(url.searchParams.get('tz'));
+    const tzOffsetMinutes = Number.isInteger(tzRaw) && Math.abs(tzRaw) <= 14 * 60 ? tzRaw : 0;
 
     const conn: Connection = { audio: new Readable({ read() {} }) };
     this.connections.set(client, conn);
@@ -148,7 +151,7 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
             (msg) => this.logger.warn(msg),
           );
         }
-        conn.assistant = this.assistants.create({ userId, mode, topic }, (e) => {
+        conn.assistant = this.assistants.create({ userId, mode, topic, tzOffsetMinutes }, (e) => {
           this.send(client, e);
           // Speak the finished answer with the server voice (if the watch asked for it).
           if (e.type === 'answer.done') void conn.speech?.speak(e.id, e.text);

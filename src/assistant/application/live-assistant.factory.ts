@@ -7,6 +7,7 @@ import {
   LiveAssistantSession,
 } from './live-assistant.session';
 import { MEMORY_CONTEXT_PORT, MemoryContextPort } from './ports/memory-context.port';
+import { MEMORY_RECALL_PORT, MemoryRecallPort } from './ports/memory-recall.port';
 
 /**
  * Factory (GoF) that wires singleton ports into short-lived, per-connection
@@ -19,6 +20,7 @@ export class LiveAssistantFactory {
   constructor(
     @Inject(CHAT_STREAM_PORT) private readonly chat: ChatStreamPort,
     @Optional() @Inject(MEMORY_CONTEXT_PORT) private readonly memory: MemoryContextPort | null,
+    @Optional() @Inject(MEMORY_RECALL_PORT) private readonly recall: MemoryRecallPort | null,
     private readonly config: ConfigService,
   ) {}
 
@@ -28,6 +30,7 @@ export class LiveAssistantFactory {
       {
         chat: this.chat,
         memory: useMemory ? this.memory : null,
+        recall: useMemory ? this.recall : null,
         log: (msg) => this.logger.warn(msg),
         trace: (msg) => this.logger.log(msg),
         ...(this.config.get<boolean>('assistant.debugLogText') ? { debugText: (msg: string) => this.logger.log(`[debug-text] ${msg}`) } : {}),

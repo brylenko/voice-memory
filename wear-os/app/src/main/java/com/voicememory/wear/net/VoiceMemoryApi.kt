@@ -131,6 +131,8 @@ class VoiceMemoryApi(
             if (save) addQueryParameter("save", "1")
             if (language != null) addQueryParameter("lang", language)
             if (topic != "none") addQueryParameter("topic", topic)
+            // Local "today" and times like "said at 14:05" for questions about past conversations.
+            addQueryParameter("tz", (java.time.ZonedDateTime.now().offset.totalSeconds / 60).toString())
         }.build()
         // OkHttp accepts http(s) URLs for WebSockets and upgrades them itself.
         return http.newWebSocket(Request.Builder().url(url).build(), listener)

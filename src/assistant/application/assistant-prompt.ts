@@ -57,38 +57,59 @@ const FORCED_RULES = [
   `Do not reply ${SKIP_TOKEN}.`,
 ];
 
-const fmtTime = (d: Date) => d.toISOString().slice(11, 16);
-const fmtDateTime = (d: Date) => d.toISOString().slice(0, 16).replace('T', ' ');
+/** Times are shown in the user's local zone (watch offset) — "said at 14:05" must match their clock. */
+const shift = (d: Date, tzMin: number) => new Date(d.getTime() + tzMin * 60_000);
+const fmtTime = (d: Date, tzMin = 0) => shift(d, tzMin).toISOString().slice(11, 16);
+const fmtDateTime = (d: Date, tzMin = 0) => shift(d, tzMin).toISOString().slice(0, 16).replace('T', ' ');
+
+const MEMORY_QUESTION_RULES = [
+  'MEMORY QUESTION: the user asks about their OWN past conversations recorded by the watch.',
+  'Answer ONLY from "Personal memory" and "Day summary" below — never from general knowledge, never web search.',
+  'Say when it was said (time, or date + time). If nothing relevant is there, say plainly that nothing about it was',
+  'recorded. This always deserves an answer.',
+];
 
 export function buildAssistantMessages(params: {
   conversation: readonly HeardUtterance[];
   memory: readonly MemoryFact[];
   forced: boolean;
   topic?: AssistantTopicId;
+  /** The >> request asks about the user's own past conversations. */
+  memoryQuestion?: boolean;
+  daySummary?: string | null;
+  /** User's UTC offset in minutes (local time for "when was it said"). */
+  tzOffsetMinutes?: number;
   now?: Date;
 }): ChatMessage[] {
-  const { conversation, memory, forced, topic = 'none', now = new Date() } = params;
+  const {
+    conversation, memory, forced, topic = 'none', memoryQuestion = false, daySummary = null,
+    tzOffsetMinutes: tz = 0, now = new Date(),
+  } = params;
   const system = [
     ...BASE_RULES,
     ...topicRules(topic),
     ...(forced ? FORCED_RULES : AUTO_RULES),
-    `Current time (UTC): ${fmtDateTime(now)}.`,
+    ...(memoryQuestion ? MEMORY_QUESTION_RULES : []),
+    `Current local time: ${fmtDateTime(now, tz)} (UTC${tz >= 0 ? '+' : '-'}${Math.abs(tz / 60)}).`,
   ].join('\n');
 
   const firstOfRequest = currentRequestStart(conversation);
   const transcript = conversation
-    .map((u, i) => `${i >= firstOfRequest ? '>>' : '  '} [${fmtTime(u.at)}] ${u.text}`)
+    .map((u, i) => `${i >= firstOfRequest ? '>>' : '  '} [${fmtTime(u.at, tz)}] ${u.text}`)
     .join('\n');
 
   const memoryBlock = memory.length
-    ? memory.map((m) => `- (${fmtDateTime(m.heardAt)}) ${m.text}`).join('\n')
+    ? memory.map((m) => `- (${fmtDateTime(m.heardAt, tz)}) ${m.text}`).join('\n')
     : '(nothing relevant)';
 
   return [
     { role: 'system', content: system },
     {
       role: 'user',
-      content: `Personal memory:\n${memoryBlock}\n\nLive conversation (latest marked >>):\n${transcript}`,
+      content:
+        `Personal memory:\n${memoryBlock}\n\n` +
+        (daySummary ? `Day summary:\n${daySummary}\n\n` : '') +
+        `Live conversation (latest marked >>):\n${transcript}`,
     },
   ];
 }

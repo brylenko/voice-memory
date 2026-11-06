@@ -3,6 +3,7 @@ import type { ChatStreamPort } from '../../ai/ports/chat-stream.port';
 import { AssistantEvent, LiveAssistantSession } from './live-assistant.session';
 import type { MemoryContextPort } from './ports/memory-context.port';
 import { AiUnavailableError } from '../../ai/ai-availability';
+import type { MemoryRecallPort } from './ports/memory-recall.port';
 
 async function* stream(parts: string[], delayMs = 0): AsyncIterable<string> {
   for (const p of parts) {
@@ -22,13 +23,14 @@ function makeChat(reply: (messages: ChatMessage[]) => string[], delayMs = 0) {
 function makeSession(opts: {
   chat: ChatStreamPort;
   memory?: MemoryContextPort | null;
+  recall?: MemoryRecallPort | null;
   mode?: 'auto' | 'manual';
   debounceMs?: number;
 }) {
   const events: AssistantEvent[] = [];
   const session = new LiveAssistantSession(
-    { chat: opts.chat, memory: opts.memory ?? null, debounceMs: opts.debounceMs ?? 0 },
-    { userId: 'u1', mode: opts.mode ?? 'auto' },
+    { chat: opts.chat, memory: opts.memory ?? null, recall: opts.recall ?? null, debounceMs: opts.debounceMs ?? 0 },
+    { userId: 'u1', mode: opts.mode ?? 'auto', tzOffsetMinutes: 120 },
     (e) => events.push(e),
   );
   return { session, events };
@@ -158,6 +160,41 @@ describe('LiveAssistantSession', () => {
     await session.idle();
 
     expect(calls).toHaveLength(1);
+  });
+
+  it('answers questions about past conversations from date-aware recall, in local time', async () => {
+    const { chat, calls } = makeChat(() => ['В 11:05 договорились перенести демо на вторник.']);
+    const memory: MemoryContextPort = { findRelevant: jest.fn().mockResolvedValue([]) };
+    const recall: MemoryRecallPort = {
+      recall: jest.fn().mockResolvedValue({
+        facts: [{ text: 'Демо переносим на вторник', heardAt: new Date('2026-11-06T09:05:00Z') }],
+        daySummary: '• Демо → вторник',
+      }),
+    };
+    const { session } = makeSession({ chat, memory, recall });
+
+    session.onUtterance('1', 'Что мы сегодня решили про демо?');
+    await session.idle();
+
+    expect(recall.recall).toHaveBeenCalledWith('u1', 'Что мы сегодня решили про демо?', { includeDay: true, tzOffsetMinutes: 120 });
+    expect(memory.findRelevant).not.toHaveBeenCalled();
+    const [system, user] = calls[0];
+    expect(system.content).toContain('MEMORY QUESTION');
+    expect(user.content).toContain('(2026-11-06 11:05) Демо переносим на вторник'); // 09:05 UTC → 11:05 local
+    expect(user.content).toContain('Day summary:');
+  });
+
+  it('ordinary questions keep the opportunistic memory lookup, not recall', async () => {
+    const { chat } = makeChat(() => ['ACID — атомарность, согласованность, изоляция, долговечность.']);
+    const memory: MemoryContextPort = { findRelevant: jest.fn().mockResolvedValue([]) };
+    const recall: MemoryRecallPort = { recall: jest.fn() };
+    const { session } = makeSession({ chat, memory, recall });
+
+    session.onUtterance('1', 'Что такое ACID?');
+    await session.idle();
+
+    expect(recall.recall).not.toHaveBeenCalled();
+    expect(memory.findRelevant).toHaveBeenCalled();
   });
 
   it('stops emitting after close()', async () => {
