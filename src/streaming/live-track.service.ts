@@ -59,7 +59,9 @@ export class LiveTrackService {
   /** Final save: tags, search vector, embeddings, status=COMPLETED. Idempotent. */
   async finalize(trackId: string, userId: string, fullText: string): Promise<void> {
     if (!fullText.trim()) {
-      await this.trackRepo.update(trackId, { status: AudioTrackStatus.COMPLETED });
+      // Nothing was said: close it out, and mark tags as processed so BackfillTasksCron
+      // doesn't spend an LLM call summarizing an empty transcript.
+      await this.trackRepo.update(trackId, { status: AudioTrackStatus.COMPLETED, tagsProcessed: true });
       return;
     }
     const track = await this.trackRepo.findOneByOrFail({ id: trackId });
