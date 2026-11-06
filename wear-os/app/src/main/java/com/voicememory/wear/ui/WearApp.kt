@@ -38,6 +38,7 @@ import com.voicememory.wear.R
 import com.voicememory.wear.assist.AssistMode
 import com.voicememory.wear.assist.ConnectionStatus
 import com.voicememory.wear.memory.MemoryRecorderService
+import com.voicememory.wear.memory.AiAvailability
 import com.voicememory.wear.memory.MemoryStatus
 import com.voicememory.wear.memory.Transport
 import com.voicememory.wear.memory.TransportPreference
@@ -102,6 +103,7 @@ private fun HomeScreen(
     val memory by MemoryStatus.state.collectAsStateWithLifecycle()
     LaunchedEffect(Unit) { TransportSettings.load(context) }
     val transportPref by TransportSettings.preference.collectAsStateWithLifecycle()
+    val aiAvailable by AiAvailability.available.collectAsStateWithLifecycle()
 
     WatchList {
         item {
@@ -135,6 +137,17 @@ private fun HomeScreen(
                 },
                 toggleControl = { Switch(checked = memory.running) },
             )
+        }
+        if (!aiAvailable) {
+            item {
+                Text(
+                    text = stringResource(if (memory.running) R.string.ai_unavailable_memory else R.string.ai_unavailable),
+                    style = MaterialTheme.typography.caption2,
+                    color = MaterialTheme.colors.error,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                )
+            }
         }
         memory.lastHeard?.takeIf { memory.running }?.let { heard ->
             item {

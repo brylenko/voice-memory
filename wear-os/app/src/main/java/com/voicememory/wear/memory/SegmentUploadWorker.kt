@@ -33,6 +33,13 @@ class SegmentUploadWorker(context: Context, params: WorkerParameters) : Coroutin
         // instead of creating a new (soon abandoned) INITIALIZED track on the server.
         val ticketFile = File(file.path + TICKET_SUFFIX)
 
+        // No AI credits on the server → the upload would only produce a failed track. Keep the file.
+        val ai = api.aiStatus()
+        if (ai != null && !ai.available) {
+            AiAvailability.markUnavailable(ai.retryAfterSeconds)
+            return Result.retry()
+        }
+
         return try {
             val ticket = ticketFile.takeIf { it.exists() }
                 ?.let { UploadTicket.fromJson(it.readText()) }
@@ -74,7 +81,7 @@ class SegmentUploadWorker(context: Context, params: WorkerParameters) : Coroutin
         private const val KEY_PATH = "path"
         private const val TICKET_SUFFIX = ".ticket"
 
-        fun enqueue(context: Context, file: File) {
+        fun enqueue(context: Context, file: File, replace: Boolean = false) {
             val request = OneTimeWorkRequestBuilder<SegmentUploadWorker>()
                 .setInputData(workDataOf(KEY_PATH to file.absolutePath))
                 .setConstraints(
@@ -83,10 +90,14 @@ class SegmentUploadWorker(context: Context, params: WorkerParameters) : Coroutin
                         .setRequiresBatteryNotLow(true)
                         .build(),
                 )
-                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                .setBackoffCriteria(BackoffPolicy.LINEAR, 60, TimeUnit.SECONDS)
                 .build()
             WorkManager.getInstance(context)
-                .enqueueUniqueWork("upload-${file.name}", ExistingWorkPolicy.KEEP, request)
+                .enqueueUniqueWork(
+                    "upload-${file.name}",
+                    if (replace) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
+                    request,
+                )
         }
     }
 }

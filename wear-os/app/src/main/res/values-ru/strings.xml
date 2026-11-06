@@ -30,4 +30,6 @@
     <string name="now">сейчас</string>
     <string name="assist_empty_auto">Говорите — ответ появится здесь</string>
     <string name="assist_empty_manual">Нажмите ✨, чтобы получить ответ по сказанному</string>
+    <string name="ai_unavailable">⚠ ИИ недоступен на сервере (нет кредитов OpenAI)</string>
+    <string name="ai_unavailable_memory">⚠ ИИ недоступен — запись хранится на часах</string>
 </resources>

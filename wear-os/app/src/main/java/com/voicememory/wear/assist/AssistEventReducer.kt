@@ -8,9 +8,11 @@ import org.json.JSONObject
  */
 object AssistEventReducer {
     private const val MAX_ANSWERS = 10
+    private const val AI_UNAVAILABLE = "ai_unavailable"
 
     sealed interface Effect {
         data class AnswerReady(val text: String) : Effect
+        data object AiUnavailable : Effect
     }
 
     fun reduce(state: AssistState, json: JSONObject): Pair<AssistState, Effect?> {
@@ -29,11 +31,18 @@ object AssistEventReducer {
                 state.updateAnswer(json.getString("id")) { it.copy(text = text, done = true) } to
                     Effect.AnswerReady(text)
             }
-            "answer.error" -> state.copy(
-                answers = state.answers.filterNot { it.id == json.optString("id") },
-            ) to null
+            "answer.error" -> {
+                val next = state.copy(answers = state.answers.filterNot { it.id == json.optString("id") })
+                if (json.optString("code") == AI_UNAVAILABLE) {
+                    next.copy(status = ConnectionStatus.ERROR, aiUnavailable = true) to Effect.AiUnavailable
+                } else next to null
+            }
             "done" -> state.copy(status = ConnectionStatus.DONE) to null
-            "error" -> state.copy(status = ConnectionStatus.ERROR, error = json.optString("message")) to null
+            "error" -> {
+                val ai = json.optString("code") == AI_UNAVAILABLE
+                state.copy(status = ConnectionStatus.ERROR, error = json.optString("message"), aiUnavailable = ai) to
+                    (if (ai) Effect.AiUnavailable else null)
+            }
             else -> state to null
         }
     }

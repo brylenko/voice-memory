@@ -2,6 +2,7 @@ package com.voicememory.wear.memory.sink
 
 import android.util.Log
 import com.voicememory.wear.audio.toLittleEndianBytes
+import com.voicememory.wear.memory.AiAvailability
 import com.voicememory.wear.net.VoiceMemoryApi
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -43,7 +44,10 @@ class LiveSegmentSink(
             when (json.optString("type")) {
                 "transcript" -> json.optString("text").trim().takeIf { it.isNotEmpty() }?.let(onHeard)
                 "done" -> serverDone(true)
-                "error" -> serverDone(false)
+                "error" -> {
+                    if (json.optString("code") == AiAvailability.WIRE_CODE) AiAvailability.markUnavailable()
+                    serverDone(false) // backup file is kept and uploaded once AI is back
+                }
             }
         }
 

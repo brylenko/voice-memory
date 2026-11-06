@@ -34,4 +34,23 @@ class AssistEventReducerTest {
         assertEquals(ConnectionStatus.ERROR, s.status)
         assertEquals("quota", s.error)
     }
+
+    @Test fun `ai_unavailable error stops the session with a dedicated flag and effect`() {
+        val (s1, e1) = reduce(AssistState(), """{"type":"error","code":"ai_unavailable","message":"no credits"}""")
+        assertTrue(s1.aiUnavailable)
+        assertEquals(ConnectionStatus.ERROR, s1.status)
+        assertEquals(AssistEventReducer.Effect.AiUnavailable, e1)
+
+        val started = reduce(AssistState(), """{"type":"answer.start","id":"a1","inReplyTo":"u1"}""").first
+        val (s2, e2) = reduce(started, """{"type":"answer.error","id":"a1","code":"ai_unavailable","message":"x"}""")
+        assertTrue(s2.aiUnavailable && s2.answers.isEmpty())
+        assertEquals(AssistEventReducer.Effect.AiUnavailable, e2)
+    }
+
+    @Test fun `ordinary answer errors do not stop the session`() {
+        val started = reduce(AssistState(status = ConnectionStatus.LISTENING), """{"type":"answer.start","id":"a1","inReplyTo":"u1"}""").first
+        val (s, e) = reduce(started, """{"type":"answer.error","id":"a1","message":"x"}""")
+        assertEquals(ConnectionStatus.LISTENING, s.status)
+        assertNull(e)
+    }
 }

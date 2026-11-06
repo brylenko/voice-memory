@@ -13,6 +13,8 @@ data class DeviceConditions(
     /** Validated Wi-Fi that is not metered (no LTE / phone-proxy data). */
     val unmeteredWifi: Boolean = false,
     val online: Boolean = false,
+    /** Server can run speech recognition (false = no AI credits): streaming would be pointless. */
+    val aiAvailable: Boolean = true,
 )
 
 /**
@@ -27,7 +29,8 @@ object TransportPolicy {
      * nothing would just lose the conversation.
      */
     fun choose(c: DeviceConditions, preference: TransportPreference = TransportPreference.AUTO): Transport =
-        when (preference) {
+        if (!c.aiAvailable) Transport.SEGMENTS // record locally, upload once AI is back
+        else when (preference) {
             TransportPreference.ALWAYS_OFFLINE -> Transport.SEGMENTS
             TransportPreference.ALWAYS_LIVE -> if (c.online) Transport.LIVE else Transport.SEGMENTS
             TransportPreference.AUTO ->

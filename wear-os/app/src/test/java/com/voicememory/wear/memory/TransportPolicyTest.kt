@@ -37,3 +37,14 @@ class TransportPreferenceTest {
         assertEquals(TransportPreference.AUTO, TransportPreference.ALWAYS_OFFLINE.next())
     }
 }
+
+class TransportPolicyAiTest {
+    @Test fun `no AI on the server means local segments even when streaming is preferred`() =
+        assertEquals(
+            Transport.SEGMENTS,
+            TransportPolicy.choose(
+                DeviceConditions(charging = true, unmeteredWifi = true, online = true, aiAvailable = false),
+                TransportPreference.ALWAYS_LIVE,
+            ),
+        )
+}

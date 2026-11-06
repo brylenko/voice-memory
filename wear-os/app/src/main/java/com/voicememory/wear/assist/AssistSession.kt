@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.annotation.RequiresPermission
 import com.voicememory.wear.audio.PcmRecorder
 import com.voicememory.wear.audio.toLittleEndianBytes
+import com.voicememory.wear.memory.AiAvailability
 import com.voicememory.wear.net.VoiceMemoryApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -89,7 +90,16 @@ class AssistSession(
                 effect = e
                 next
             }
-            (effect as? AssistEventReducer.Effect.AnswerReady)?.let { scope.launch { onAnswer(it.text) } }
+            when (val e = effect) {
+                is AssistEventReducer.Effect.AnswerReady -> scope.launch { onAnswer(e.text) }
+                AssistEventReducer.Effect.AiUnavailable -> {
+                    // Pointless to keep the mic on and stream audio nobody can transcribe.
+                    AiAvailability.markUnavailable()
+                    micJob?.cancel()
+                    webSocket.close(1000, "ai unavailable")
+                }
+                null -> Unit
+            }
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {

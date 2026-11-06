@@ -31,6 +31,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -59,8 +61,18 @@ class MemoryRecorderService : LifecycleService() {
         super.onCreate()
         store = SegmentStore(this)
         conditions = DeviceConditionsMonitor(this).also { it.start() }
+        // AI came back → retry pending uploads now instead of waiting out WorkManager's backoff.
+        // drop(1): react only to the unavailable → available transition, not the initial value
+        // (REPLACE would cancel uploads that are already running).
+        AiAvailability.available
+            .drop(1)
+            .filter { it }
+            .onEach { store.pendingUploads().forEach { SegmentUploadWorker.enqueue(this, it, replace = true) } }
+            .launchIn(lifecycleScope)
         TransportSettings.load(this)
-        combine(conditions.state, TransportSettings.preference) { c, pref -> TransportPolicy.choose(c, pref) }
+        combine(conditions.state, AiAvailability.available, TransportSettings.preference) { c, ai, pref ->
+            TransportPolicy.choose(c.copy(aiAvailable = ai), pref)
+        }
             .onEach { t -> MemoryStatus.update { it.copy(transport = t) } }
             .launchIn(lifecycleScope)
     }
@@ -170,7 +182,10 @@ class MemoryRecorderService : LifecycleService() {
         // applicationContext: a live upload may settle after the service is gone.
         val upload: (File) -> Unit = { SegmentUploadWorker.enqueue(applicationContext, it) }
         val file = { onFinished: (File) -> Unit -> FileSegmentSink(store, SAMPLE_RATE, startedAtMs, onFinished) }
-        val transport = TransportPolicy.choose(conditions.state.value, TransportSettings.preference.value)
+        val transport = TransportPolicy.choose(
+            conditions.state.value.copy(aiAvailable = AiAvailability.available.value),
+            TransportSettings.preference.value,
+        )
         return when (transport) {
             Transport.SEGMENTS -> file(upload) to transport
             Transport.LIVE -> {

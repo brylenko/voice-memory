@@ -22,6 +22,8 @@ class ApiException(val code: Int, message: String) : IOException(message) {
 }
 
 data class DayItem(val at: String, val summary: String, val tags: List<String>, val live: Boolean)
+data class AiStatus(val available: Boolean, val retryAfterSeconds: Long)
+
 /** Result of phase 1, persisted by the uploader so retries reuse the same track. */
 data class UploadTicket(val trackId: String, val uploadUrl: String, val expiresAtMs: Long) {
     fun isFresh(nowMs: Long = System.currentTimeMillis()) = nowMs < expiresAtMs - 60_000
@@ -46,6 +48,18 @@ class VoiceMemoryApi(
     private val signer: DeviceSigner,
 ) {
     private val json = "application/json".toMediaType()
+
+    /** Whether the server can currently run AI (null = endpoint missing / unknown → assume yes). */
+    suspend fun aiStatus(): AiStatus? = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url("$baseUrl/api/memory/status").signed().get().build()
+        runCatching {
+            http.newCall(req).execute().use { res ->
+                if (!res.isSuccessful) return@use null
+                val ai = JSONObject(res.body!!.string()).getJSONObject("ai")
+                AiStatus(ai.getBoolean("available"), ai.optLong("retryAfterSeconds", 0))
+            }
+        }.getOrNull()
+    }
 
     /** Phase 1: reserve a track + get a URL to PUT the bytes to. */
     suspend fun requestUpload(fileName: String, durationSeconds: Int): UploadTicket = withContext(Dispatchers.IO) {

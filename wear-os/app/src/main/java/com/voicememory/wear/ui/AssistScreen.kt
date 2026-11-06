@@ -134,7 +134,11 @@ private fun StatusLine(state: AssistState) {
     val mode = stringResource(if (state.mode == AssistMode.AUTO) R.string.auto else R.string.manual)
     val text = when (state.status) {
         ConnectionStatus.CONNECTING -> stringResource(R.string.connecting)
-        ConnectionStatus.ERROR -> stringResource(R.string.error_prefix, state.error ?: "?")
+        ConnectionStatus.ERROR -> if (state.aiUnavailable) {
+            stringResource(R.string.ai_unavailable)
+        } else {
+            stringResource(R.string.error_prefix, state.error ?: "?")
+        }
         else -> state.caption.ifBlank { stringResource(R.string.listening) } + " · " + mode
     }
     Text(

@@ -14,4 +14,6 @@ data class AssistState(
     /** Newest first, capped. */
     val answers: List<Answer> = emptyList(),
     val error: String? = null,
+    /** Server reported no AI credits: mic is stopped, nothing would be answered. */
+    val aiUnavailable: Boolean = false,
 )
