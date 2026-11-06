@@ -182,7 +182,8 @@ describe('buildAssistantMessages', () => {
     const [system] = buildAssistantMessages({ conversation: [u('опиши 9 пунктов GRASP')], memory: [], forced: false });
     expect(system.content).toContain('COMPLETELY');
     expect(system.content).toContain('each item on its own line');
-    expect(system.content).toContain('literally');
+    expect(system.content).toContain('an expert in that field');
+    expect(system.content).not.toContain('starting with each letter'); // no interpretation baked into the prompt
     expect(system.content).not.toContain('Single Responsibility'); // no misleading acronym example
     expect(system.content).not.toContain('Strategy'); // no partial answer to copy either
   });
