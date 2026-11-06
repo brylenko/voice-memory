@@ -16,6 +16,7 @@ describe('assistant topics', () => {
     });
     expect(system.content).toContain('job interview');
     expect(system.content).toContain('NEVER a letter game');
+    expect(system.content).toContain('a Russian question → a Russian answer');
     expect(system.content).toContain('for EACH SOLID PRINCIPLE');
     expect(topicTranscriptionHint('interview_it')).toContain('design patterns');
   });
