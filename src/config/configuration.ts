@@ -32,6 +32,9 @@ export default () => ({
   assistant: {
     // Ground live answers in what the watch heard earlier (one embedding + pgvector query per answer).
     memoryLookup: process.env.ASSISTANT_MEMORY_LOOKUP !== 'false',
+    // Model for live assistant answers. gpt-4o-mini is cheap/fast but weak on tricky constraints;
+    // a stronger one (e.g. gpt-4.1-mini, gpt-4o) answers better at a higher price per answer.
+    model: process.env.ASSISTANT_MODEL ?? 'gpt-4o-mini',
     // Let the assistant search the web for current facts (prices, news, weather). The model
     // only searches when needed; each search is billed separately by OpenAI.
     webSearch: process.env.ASSISTANT_WEB_SEARCH !== 'false',

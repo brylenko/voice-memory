@@ -184,6 +184,7 @@ describe('buildAssistantMessages', () => {
     expect(system.content).toContain('each item on its own line');
     expect(system.content).toContain('literally');
     expect(system.content).not.toContain('Single Responsibility'); // no misleading acronym example
+    expect(system.content).not.toContain('Strategy'); // no partial answer to copy either
   });
 
   it('tells the model to read transliterated terms phonetically and to explain bare terms', () => {

@@ -56,7 +56,7 @@ import { OpenAiService } from '../common/services/openai.service';
         plain: OpenAiChatStreamAdapter,
       ) => config.get<boolean>('assistant.webSearch')
         ? new OpenAiWebSearchChatStreamAdapter(openai.client, availability, {
-          model: 'gpt-4o-mini',
+          model: config.get<string>('assistant.model') ?? 'gpt-4o-mini',
           toolType: config.get<string>('assistant.webSearchTool') ?? 'web_search',
           country: config.get<string>('assistant.searchCountry') || undefined,
         })
