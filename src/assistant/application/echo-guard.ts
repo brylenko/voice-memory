@@ -24,7 +24,13 @@ export class EchoGuard {
 
   isEcho(utterance: string): boolean {
     const words = tokenize(utterance);
-    if (words.size < 2) return false;
+    if (words.size === 0) return false;
+    // A single word is an echo only if it's a distinctive word from a recent answer
+    // (e.g. "итератор" read aloud from the answer); short common words never count.
+    if (words.size === 1) {
+      const [w] = words;
+      if (w.length < 5) return false;
+    }
     const cutoff = this.now() - this.windowMs;
     return this.recent.some((a) => {
       if (a.at < cutoff) return false;

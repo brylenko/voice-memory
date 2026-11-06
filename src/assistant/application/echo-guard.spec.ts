@@ -21,4 +21,12 @@ describe('EchoGuard', () => {
     t = 31_000;
     expect(g.isEcho('международная сеть пиццерий из США')).toBe(false);
   });
+
+  it('treats a distinctive single word from a recent answer as echo, but not short words', () => {
+    const g = new EchoGuard();
+    g.rememberAnswer('4. I — Iterator: последовательный обход. Итератор скрывает устройство коллекции.');
+    expect(g.isEcho('итератор')).toBe(true);
+    expect(g.isEcho('что')).toBe(false);
+    expect(g.isEcho('декоратор')).toBe(false); // not in the answer → a real new question
+  });
 });
