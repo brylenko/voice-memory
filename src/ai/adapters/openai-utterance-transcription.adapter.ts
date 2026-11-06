@@ -40,6 +40,7 @@ export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscripti
   ): AsyncIterable<UtteranceEvent> {
     const queue = new AsyncQueue<UtteranceEvent>();
     const partials = new Map<string, string>();
+    const seenTypes = new Set<string>();
     const pendingAudio: Buffer[] = [];
     let ready = false;
     let drainTimer: NodeJS.Timeout | null = null;
@@ -118,8 +119,22 @@ export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscripti
 
         case 'input_audio_buffer.speech_started':
         case 'input_audio_buffer.speech_stopped':
+        case 'input_audio_buffer.committed':
           this.logger.log(`← ${type}`);
           return;
+
+        case 'conversation.item.input_audio_transcription.failed': {
+          // Transcription of one turn failed (bad audio, model/permission issue...). Surface the reason.
+          const err = event.error as { code?: string; message?: string } | undefined;
+          this.logger.error(`← transcription failed: ${JSON.stringify(err)}`);
+          partials.delete(itemId);
+          if (err?.code === 'insufficient_quota') {
+            this.availability.markUnavailable();
+            queue.fail(new AiUnavailableError(err.message));
+            close();
+          }
+          return;
+        }
 
         case 'conversation.item.input_audio_transcription.delta': {
           const text = (partials.get(itemId) ?? '') + ((event.delta as string) ?? '');
@@ -137,6 +152,13 @@ export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscripti
           if (drainTimer) close();
           return;
         }
+
+        default:
+          if (!seenTypes.has(type)) {
+            seenTypes.add(type);
+            this.logger.log(`← (unhandled) ${type}`);
+          }
+          return;
 
         case 'error': {
           const err = event.error as { code?: string; message?: string } | undefined;
