@@ -143,3 +143,15 @@ describe('LiveAssistantSession', () => {
     expect(events.some((e) => e.type === 'answer.done')).toBe(false);
   });
 });
+
+describe('buildAssistantMessages', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { buildAssistantMessages } = require('./assistant-prompt');
+  const u = (text: string) => ({ id: '1', text, at: new Date('2026-11-06T10:00:00Z') });
+
+  it('tells the model to read transliterated terms phonetically and to explain bare terms', () => {
+    const [system] = buildAssistantMessages({ conversation: [u('доминос')], memory: [], forced: false });
+    expect(system.content).toContain('transliterated');
+    expect(system.content).toContain('bare term');
+  });
+});

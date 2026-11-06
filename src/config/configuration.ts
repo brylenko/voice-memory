@@ -18,6 +18,11 @@ export default () => ({
   // Realtime transcription model for utterance segmentation (server VAD): /assist/live and /audio/live?vad=1.
   // Must support turn detection — gpt-realtime-whisper does not.
   realtimeVadTranscriptionModel: process.env.REALTIME_VAD_TRANSCRIPTION_MODEL ?? 'gpt-4o-transcribe',
+  // Vocabulary/style hint for that model: mixed-language speech is common, and English terms
+  // spoken inside Russian/Ukrainian otherwise come out transliterated ("acid" → "асид").
+  realtimeTranscriptionPrompt: process.env.REALTIME_TRANSCRIPTION_PROMPT ??
+    'Mixed Russian, Ukrainian and English speech. Write English words, brand names, product names ' +
+    'and technical terms in Latin script as they are normally spelled, e.g. acid, Domino\'s, iPhone, API.',
   // 64 hex chars = 32 bytes = AES-256 key. Leave empty to disable field encryption (dev only).
   encryptionKey: process.env.ENCRYPTION_KEY ?? '',
   device: {

@@ -31,6 +31,7 @@ import androidx.wear.compose.material.ToggleButton
 import androidx.wear.compose.material.ToggleButtonDefaults
 import com.voicememory.wear.R
 import com.voicememory.wear.assist.Answer
+import com.voicememory.wear.assist.AnswerFeedback
 import com.voicememory.wear.assist.AssistMode
 import com.voicememory.wear.assist.AssistState
 import com.voicememory.wear.assist.ConnectionStatus
@@ -54,6 +55,7 @@ internal fun AssistScreen(
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val speak by vm.speak.collectAsStateWithLifecycle()
+    val speechProblem by vm.speechProblem.collectAsStateWithLifecycle()
 
     LaunchedEffect(micGranted) { if (micGranted) vm.start() else requestMic() }
     DisposableEffect(Unit) {
@@ -64,6 +66,20 @@ internal fun AssistScreen(
 
     WatchList {
         item { StatusLine(state) }
+        if (speak && speechProblem != null) {
+            item {
+                Text(
+                    text = stringResource(
+                        if (speechProblem == AnswerFeedback.SpeechProblem.NO_ENGINE) R.string.tts_no_engine
+                        else R.string.tts_no_voice,
+                    ),
+                    style = MaterialTheme.typography.caption3,
+                    color = MaterialTheme.colors.error,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                )
+            }
+        }
 
         if (state.answers.isEmpty()) {
             item {

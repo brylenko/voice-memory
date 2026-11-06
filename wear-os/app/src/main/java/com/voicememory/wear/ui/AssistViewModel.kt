@@ -22,6 +22,9 @@ class AssistViewModel(app: Application) : AndroidViewModel(app) {
 
     val state: StateFlow<AssistState> = session.state
 
+    /** Non-null when "Speak" is on but the watch can't actually speak (no engine / no voice). */
+    val speechProblem: StateFlow<AnswerFeedback.SpeechProblem?> = feedback.problem
+
     private val _speak = MutableStateFlow(false)
     val speak: StateFlow<Boolean> = _speak.asStateFlow()
 

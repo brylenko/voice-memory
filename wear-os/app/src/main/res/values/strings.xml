@@ -33,4 +33,6 @@
     <string name="assist_empty_manual">Tap ✨ to get an answer about what was just said</string>
     <string name="ai_unavailable">⚠ AI unavailable on the server (no OpenAI credits)</string>
     <string name="ai_unavailable_memory">⚠ AI unavailable — recording is kept on the watch</string>
+    <string name="tts_no_engine">Speech unavailable: no TTS engine on the watch</string>
+    <string name="tts_no_voice">No voice for this language — install it in Settings → Text-to-speech</string>
 </resources>
