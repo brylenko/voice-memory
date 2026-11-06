@@ -41,8 +41,17 @@ class AnswerFeedback(context: Context) {
     var speak: Boolean = false
         set(value) {
             field = value
-            if (!value) tts?.stop()
+            if (!value) { tts?.stop(); speakingSince = 0; speechEndedAt = System.currentTimeMillis() }
         }
+
+    // Half-duplex: while we talk (and a moment after), the mic must not feed our own voice
+    // back to the server — otherwise the assistant answers its own answers in a loop.
+    @Volatile private var speakingSince = 0L
+    @Volatile private var speechEndedAt = 0L
+
+    /** True while an answer is being (or about to be) spoken, plus a short tail for echo. */
+    fun isOutputActive(now: Long = System.currentTimeMillis()): Boolean =
+        speakingSince != 0L || now - speechEndedAt < ECHO_TAIL_MS
 
     fun onAnswer(text: String) {
         vibrator?.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
@@ -90,7 +99,9 @@ class AnswerFeedback(context: Context) {
             return
         }
         _problem.value = null
+        speakingSince = System.currentTimeMillis() // mute the mic from now, not from onStart
         val rc = engineNow.speak(text, TextToSpeech.QUEUE_FLUSH, null, "answer-${System.nanoTime()}")
+        if (rc != TextToSpeech.SUCCESS) markSpeechEnded()
         Log.i(TAG, "speak() = $rc (${text.length} chars)")
     }
 
@@ -107,13 +118,20 @@ class AnswerFeedback(context: Context) {
 
     private val progressLogger = object : UtteranceProgressListener() {
         override fun onStart(utteranceId: String?) { Log.i(TAG, "speaking…") }
-        override fun onDone(utteranceId: String?) { Log.i(TAG, "spoken") }
+        override fun onDone(utteranceId: String?) { Log.i(TAG, "spoken"); markSpeechEnded() }
+        override fun onStop(utteranceId: String?, interrupted: Boolean) { markSpeechEnded() }
         @Deprecated("Deprecated in Java")
-        override fun onError(utteranceId: String?) { Log.w(TAG, "TTS error") }
-        override fun onError(utteranceId: String?, errorCode: Int) { Log.w(TAG, "TTS error $errorCode") }
+        override fun onError(utteranceId: String?) { Log.w(TAG, "TTS error"); markSpeechEnded() }
+        override fun onError(utteranceId: String?, errorCode: Int) { Log.w(TAG, "TTS error $errorCode"); markSpeechEnded() }
+    }
+
+    private fun markSpeechEnded() {
+        speakingSince = 0
+        speechEndedAt = System.currentTimeMillis()
     }
 
     private companion object {
+        const val ECHO_TAIL_MS = 600L
         const val TAG = "AnswerFeedback"
         const val GOOGLE_TTS = "com.google.android.tts"
     }

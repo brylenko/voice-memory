@@ -4,6 +4,7 @@ import { gateAnswer } from './answer-gate';
 import { aiErrorCode } from '../../ai/ai-availability';
 import { buildAssistantMessages, MAX_ANSWER_CHARS } from './assistant-prompt';
 import { ConversationWindow } from './conversation-window';
+import { EchoGuard } from './echo-guard';
 import type { MemoryContextPort, MemoryFact } from './ports/memory-context.port';
 
 /**
@@ -46,6 +47,7 @@ export class LiveAssistantSession {
   private running = false;
   private pending: { forced: boolean } | null = null;
   private lastEvaluatedId: string | null = null;
+  private readonly echo = new EchoGuard();
   private closed = false;
   private mode: AssistantMode;
 
@@ -63,6 +65,11 @@ export class LiveAssistantSession {
 
   onUtterance(id: string, text: string, at: Date = new Date()): void {
     if (this.closed || !text.trim()) return;
+    if (this.echo.isEcho(text)) {
+      // Our own spoken answer came back through the microphone — never answer it.
+      this.deps.trace?.('ignored echo of a recent answer');
+      return;
+    }
     this.window.add({ id, text: text.trim(), at });
     if (this.mode === 'auto') this.schedule(false);
   }
@@ -137,6 +144,7 @@ export class LiveAssistantSession {
       }
       if (started && !this.closed) {
         this.emit({ type: 'answer.done', id: answerId, text: answer.trim() });
+        this.echo.rememberAnswer(answer);
         this.deps.trace?.(`answered (${answer.trim().length} chars, forced=${forced})`);
       }
     } catch (err) {

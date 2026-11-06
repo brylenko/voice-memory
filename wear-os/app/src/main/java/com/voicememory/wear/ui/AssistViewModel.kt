@@ -18,7 +18,10 @@ import kotlinx.coroutines.flow.asStateFlow
 class AssistViewModel(app: Application) : AndroidViewModel(app) {
     private val container = AppContainer.get(app)
     private val feedback = AnswerFeedback(app)
-    private val session = AssistSession(container.api, viewModelScope, container.language, feedback::onAnswer)
+    private val session = AssistSession(
+        container.api, viewModelScope, container.language, feedback::onAnswer,
+        micMuted = { feedback.isOutputActive() },
+    )
 
     val state: StateFlow<AssistState> = session.state
 

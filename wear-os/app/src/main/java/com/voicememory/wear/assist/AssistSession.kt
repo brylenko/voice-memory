@@ -32,6 +32,8 @@ class AssistSession(
     private val scope: CoroutineScope,
     private val language: String?,
     private val onAnswer: (String) -> Unit,
+    /** While true (our answer is being spoken) mic audio is not sent: prevents echo loops. */
+    private val micMuted: () -> Boolean = { false },
 ) {
     private val _state = MutableStateFlow(AssistState())
     val state: StateFlow<AssistState> = _state.asStateFlow()
@@ -46,7 +48,10 @@ class AssistSession(
         micJob = scope.launch(Dispatchers.Default) { // PCM → bytes off the main thread
             // Frames are streamed immediately; the server buffers them until auth completes.
             PcmRecorder.frames(SAMPLE_RATE, FRAME_MS).collect { frame ->
-                socket?.send(frame.toLittleEndianBytes().toByteString())
+                // Send silence instead of dropping frames: the server's VAD still sees the
+                // turn end, and the realtime session timeline stays continuous.
+                val pcm = if (micMuted()) SILENCE else frame.toLittleEndianBytes()
+                socket?.send(pcm.toByteString())
             }
         }
     }
@@ -133,5 +138,6 @@ class AssistSession(
         const val SAMPLE_RATE = 24_000 // backend / Realtime API contract
         const val FRAME_MS = 100
         const val STOP_GRACE_MS = 6_000L
+        val SILENCE = ByteArray(SAMPLE_RATE * FRAME_MS / 1000 * 2)
     }
 }

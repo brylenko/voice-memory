@@ -131,6 +131,18 @@ describe('LiveAssistantSession', () => {
     expect(events).toEqual([expect.objectContaining({ type: 'answer.error', code: 'ai_unavailable' })]);
   });
 
+  it('does not answer its own spoken answer picked up by the microphone', async () => {
+    const { chat, calls } = makeChat(() => ['Пицца Domino’s — американская сеть пиццерий.']);
+    const { session } = makeSession({ chat });
+
+    session.onUtterance('1', 'доминос');
+    await session.idle();
+    session.onUtterance('2', 'пицца доминос американская сеть пиццерий');
+    await session.idle();
+
+    expect(calls).toHaveLength(1);
+  });
+
   it('stops emitting after close()', async () => {
     const { chat } = makeChat(() => ['a', 'b', 'c'], 10);
     const { session, events } = makeSession({ chat });
