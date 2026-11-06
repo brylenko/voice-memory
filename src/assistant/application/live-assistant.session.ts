@@ -5,6 +5,7 @@ import { aiErrorCode } from '../../ai/ai-availability';
 import { buildAssistantMessages, MAX_ANSWER_CHARS } from './assistant-prompt';
 import { ConversationWindow } from './conversation-window';
 import { EchoGuard } from './echo-guard';
+import type { AssistantTopicId } from './assistant-topic';
 import { stripDeltaMarkup, toPlainText } from './plain-text';
 import type { MemoryContextPort, MemoryFact } from './ports/memory-context.port';
 
@@ -36,6 +37,7 @@ export interface LiveAssistantContext {
   userId: string;
   mode: AssistantMode;
   memoryFacts?: number;
+  topic?: AssistantTopicId;
 }
 
 /**
@@ -62,11 +64,19 @@ export class LiveAssistantSession {
     private readonly emit: (event: AssistantEvent) => void,
   ) {
     this.mode = ctx.mode;
+    this.topic = ctx.topic ?? 'none';
   }
 
   setMode(mode: AssistantMode): void {
     this.mode = mode;
   }
+
+  /** Conversation context (e.g. a technical interview) — changes how questions are read. */
+  setTopic(topic: AssistantTopicId): void {
+    this.topic = topic;
+  }
+
+  private topic: AssistantTopicId = 'none';
 
   onUtterance(id: string, text: string, at: Date = new Date()): void {
     if (this.closed || !text.trim()) return;
@@ -145,6 +155,7 @@ export class LiveAssistantSession {
         conversation: this.window.snapshot(),
         memory,
         forced,
+        topic: this.topic,
       });
 
       const gated = await gateAnswer(this.deps.chat.stream(messages, { temperature: 0.3 }));

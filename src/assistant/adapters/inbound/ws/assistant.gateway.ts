@@ -15,6 +15,7 @@ import { ConfigService } from '@nestjs/config';
 import { LiveAssistantFactory } from '../../../application/live-assistant.factory';
 import { SPEECH_SYNTHESIS_PORT, SpeechSynthesisPort } from '../../../../ai/ports/speech-synthesis.port';
 import { SpeechEvent, SpeechRelay } from './speech-relay';
+import { parseTopic, topicTranscriptionHint } from '../../../application/assistant-topic';
 import { aiErrorCode } from '../../../../ai/ai-availability';
 import type {
   AssistantEvent,
@@ -50,6 +51,7 @@ const MAX_PENDING_BYTES = 24_000 * 2 * 10;
  *   {"type":"ask"}          — force an answer about the latest utterance
  *   {"type":"mode","mode":"auto"|"manual"} — switch mode on the fly
  *   {"type":"speak","enabled":true|false}  — speak answers with the server voice
+ *   {"type":"topic","id":"interview_it"|…} — conversation context (also ?topic= on connect)
  *   "end"                   — stop listening (flush + close)
  *
  * Server → client:
@@ -102,6 +104,7 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
     const mode: AssistantMode = url.searchParams.get('mode') === 'manual' ? 'manual' : 'auto';
     const lang = url.searchParams.get('lang') ?? undefined;
     const save = url.searchParams.get('save') === '1';
+    const topic = parseTopic(url.searchParams.get('topic'));
 
     const conn: Connection = { audio: new Readable({ read() {} }) };
     this.connections.set(client, conn);
@@ -145,7 +148,7 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
             (msg) => this.logger.warn(msg),
           );
         }
-        conn.assistant = this.assistants.create({ userId, mode }, (e) => {
+        conn.assistant = this.assistants.create({ userId, mode, topic }, (e) => {
           this.send(client, e);
           // Speak the finished answer with the server voice (if the watch asked for it).
           if (e.type === 'answer.done') void conn.speech?.speak(e.id, e.text);
@@ -154,7 +157,7 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
         for (const frame of pending) conn.audio.push(frame);
         pending.length = 0;
         this.send(client, { type: 'ready', mode, serverTts: this.serverTts });
-        void this.runSession(client, conn, userId, { lang, save });
+        void this.runSession(client, conn, userId, { lang, save, promptHint: topicTranscriptionHint(topic) });
       })
       .catch((err: Error) => {
         this.logger.error(`resolveUser failed: ${err.message}`);
@@ -177,10 +180,11 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
       conn.audio.push(null);
       return;
     }
-    let msg: { type?: string; mode?: string; enabled?: boolean };
+    let msg: { type?: string; mode?: string; enabled?: boolean; id?: string };
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'ask') conn.assistant?.askNow();
+    if (msg.type === 'topic') conn.assistant?.setTopic(parseTopic(msg.id));
     if (msg.type === 'speak' && conn.speech) {
       conn.speech.enabled = msg.enabled === true;
       if (!conn.speech.enabled) conn.speech.stop();
@@ -194,14 +198,14 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
     client: WebSocket,
     conn: Connection,
     userId: string,
-    opts: { lang?: string; save: boolean },
+    opts: { lang?: string; save: boolean; promptHint?: string },
   ): Promise<void> {
     const transcript: string[] = [];
     this.logger.log(`assistant session started (save=${opts.save})`);
     const trackId = opts.save ? await this.liveTracks.start(userId, 'wear-assist') : undefined;
 
     try {
-      for await (const ev of this.stt.transcribeUtterances(conn.audio, { language: opts.lang })) {
+      for await (const ev of this.stt.transcribeUtterances(conn.audio, { language: opts.lang, promptHint: opts.promptHint })) {
         if (ev.type === 'partial') {
           this.send(client, { type: 'partial', id: ev.utteranceId, text: ev.text });
           continue;

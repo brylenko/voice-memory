@@ -89,7 +89,10 @@ export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscripti
               transcription: {
                 model: this.model,
                 ...(options.language ? { language: options.language } : {}),
-                ...(this.prompt ? { prompt: this.prompt } : {}),
+                ...(() => {
+                  const prompt = [this.prompt, options.promptHint].filter(Boolean).join(' ');
+                  return prompt ? { prompt } : {};
+                })(),
               },
               turn_detection: {
                 type: 'server_vad',

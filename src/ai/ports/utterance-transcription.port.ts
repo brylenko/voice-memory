@@ -15,6 +15,8 @@ export interface UtteranceTranscriptionOptions {
   language?: string;
   /** Silence (ms) that closes an utterance. Lower = snappier, higher = fewer split sentences. */
   silenceMs?: number;
+  /** Extra vocabulary/context hint for recognition (e.g. the conversation topic). */
+  promptHint?: string;
 }
 
 /**

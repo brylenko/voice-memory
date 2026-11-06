@@ -2,6 +2,7 @@ import type { ChatMessage } from '../../ai/ports/chat-completion.port';
 import { SKIP_TOKEN } from './answer-gate';
 import type { HeardUtterance } from './conversation-window';
 import type { MemoryFact } from './ports/memory-context.port';
+import { AssistantTopicId, topicRules } from './assistant-topic';
 
 /** Length of an unsolicited hint: readable at a glance on a round watch face. */
 export const SHORT_ANSWER_CHARS = 220;
@@ -61,11 +62,13 @@ export function buildAssistantMessages(params: {
   conversation: readonly HeardUtterance[];
   memory: readonly MemoryFact[];
   forced: boolean;
+  topic?: AssistantTopicId;
   now?: Date;
 }): ChatMessage[] {
-  const { conversation, memory, forced, now = new Date() } = params;
+  const { conversation, memory, forced, topic = 'none', now = new Date() } = params;
   const system = [
     ...BASE_RULES,
+    ...topicRules(topic),
     ...(forced ? FORCED_RULES : AUTO_RULES),
     `Current time (UTC): ${fmtDateTime(now)}.`,
   ].join('\n');
