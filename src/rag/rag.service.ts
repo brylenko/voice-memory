@@ -3,7 +3,7 @@ import { CHAT_COMPLETION_PORT, ChatCompletionPort } from '../ai/ports/chat-compl
 import { EMBEDDING_PORT, EmbeddingPort } from '../ai/ports/embedding.port';
 import { AudioChunkRepository, SimilaritySearchResult } from '../audio-chunk/audio-chunk.repository';
 
-interface DateWindow {
+export interface DateWindow {
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
   cleanQuery: string;
@@ -39,16 +39,7 @@ export class RagService {
   ) {}
 
   async ask(userId: string, query: string): Promise<AskResult> {
-    const window = await this.extractDateWindow(query);
-    const [queryEmbedding] = await this.embedding.embed([window.cleanQuery]);
-
-    const topChunks = await this.chunkRepo.searchTopK({
-      userId,
-      startDate: window.startDate,
-      endDate: window.endDate,
-      queryEmbedding,
-      topK: 5,
-    });
+    const { window, chunks: topChunks } = await this.recall(userId, query, 5);
 
     const answer = await this.generateAnswer(window.cleanQuery, topChunks);
 
@@ -61,6 +52,23 @@ export class RagService {
         distance: c.distance,
       })),
     };
+  }
+
+  /**
+   * Retrieval half of ask(): date-window NLU + filtered vector search, without
+   * generating an answer. Reused by the live assistant to answer from memory.
+   */
+  async recall(userId: string, query: string, topK = 5): Promise<{ window: DateWindow; chunks: SimilaritySearchResult[] }> {
+    const window = await this.extractDateWindow(query);
+    const [queryEmbedding] = await this.embedding.embed([window.cleanQuery]);
+    const chunks = await this.chunkRepo.searchTopK({
+      userId,
+      startDate: window.startDate,
+      endDate: window.endDate,
+      queryEmbedding,
+      topK,
+    });
+    return { window, chunks };
   }
 
   private async extractDateWindow(query: string): Promise<DateWindow> {

@@ -107,6 +107,34 @@ _(Inspired by AI voice assistant concepts and meeting intelligence tools.)_
 - **Self-hostable** — your S3 bucket, your Postgres, your OpenAI key
 - **Hexagonal architecture** — swap STT / LLM / storage without touching business logic
 
+## Galaxy Watch client (`wear-os/`)
+
+A standalone Wear OS app (Galaxy Watch4+) with two modes — see [`wear-os/README.md`](wear-os/README.md):
+
+- **Memory** — listens all day, keeps only speech (on-device VAD). Hybrid transport,
+  chosen per conversation: on the charger / unmetered Wi-Fi it streams to
+  `WS /audio/live?channel=wear-live&vad=1` (text persisted utterance by utterance,
+  with a local AAC backup uploaded if the stream fails); otherwise it uploads
+  conversation-sized AAC segments via the two-phase flow (`channel: "wear-os"`). `GET /api/memory/day` returns the day's notes plus an
+  LLM recap ("what did I hear today?").
+- **Assistant** — streams the mic to `WS /assist/live`; the server splits speech
+  into utterances (Realtime API server VAD) and pushes short answers back in real
+  time, grounded in the user's own memory.
+
+```
+watch mic ─PCM16 24k─► AssistantGateway ─► UTTERANCE_TRANSCRIPTION_PORT (server VAD)
+                                │                 │ final utterance
+                                │                 ▼
+                                │      LiveAssistantSession (coalescing, per connection)
+                                │        ├─ MEMORY_CONTEXT_PORT (pgvector top-k)
+                                │        └─ CHAT_STREAM_PORT → gateAnswer("[SKIP]" | stream)
+                                ◄──────── answer.start / answer.delta / answer.done
+```
+
+One streaming LLM call both *decides* and *answers*: the model replies `[SKIP]`
+when nothing deserves a hint; `gateAnswer()` buffers just enough leading tokens
+to detect it and aborts the stream, otherwise it replays the buffered prefix.
+
 ## Hexagonal ingestion module
 
 Audio can arrive from more than one "channel" (device, Telegram, tomorrow maybe

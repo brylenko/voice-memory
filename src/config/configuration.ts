@@ -15,11 +15,39 @@ export default () => ({
     port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
   },
   openaiApiKey: process.env.OPENAI_API_KEY ?? '',
+  // Realtime transcription model for utterance segmentation (server VAD): /assist/live and /audio/live?vad=1.
+  // Must support turn detection — gpt-realtime-whisper does not.
+  realtimeVadTranscriptionModel: process.env.REALTIME_VAD_TRANSCRIPTION_MODEL ?? 'gpt-4o-transcribe',
+  // Vocabulary/style hint for that model: mixed-language speech is common, and English terms
+  // spoken inside Russian/Ukrainian otherwise come out transliterated ("acid" → "асид").
+  realtimeTranscriptionPrompt: process.env.REALTIME_TRANSCRIPTION_PROMPT ??
+    'Mixed Russian, Ukrainian and English speech. Write English words, brand names, product names ' +
+    'and technical terms in Latin script as they are normally spelled, e.g. acid, Domino\'s, iPhone, API.',
   // 64 hex chars = 32 bytes = AES-256 key. Leave empty to disable field encryption (dev only).
   encryptionKey: process.env.ENCRYPTION_KEY ?? '',
   device: {
     hmacSecret: process.env.DEVICE_HMAC_SECRET ?? '',
     signatureTtlSeconds: parseInt(process.env.DEVICE_SIGNATURE_TTL_SECONDS ?? '300', 10),
+  },
+  assistant: {
+    // Ground live answers in what the watch heard earlier (one embedding + pgvector query per answer).
+    memoryLookup: process.env.ASSISTANT_MEMORY_LOOKUP !== 'false',
+    // Model for live assistant answers. gpt-4o-mini is cheap/fast but weak on tricky constraints;
+    // a stronger one (e.g. gpt-4.1-mini, gpt-4o) answers better at a higher price per answer.
+    model: process.env.ASSISTANT_MODEL ?? 'gpt-4o-mini',
+    // Let the assistant search the web for current facts (prices, news, weather). The model
+    // only searches when needed; each search is billed separately by OpenAI.
+    webSearch: process.env.ASSISTANT_WEB_SEARCH !== 'false',
+    webSearchTool: process.env.ASSISTANT_WEB_SEARCH_TOOL ?? 'web_search',
+    // ISO country for local results (currency, shops), e.g. UA. Empty = no location hint.
+    searchCountry: process.env.ASSISTANT_SEARCH_COUNTRY ?? '',
+    // Server-side voice for answers (natural, multilingual) streamed to the watch as PCM.
+    // When off, the watch falls back to its own (offline) TTS engine.
+    serverTts: process.env.ASSISTANT_SERVER_TTS !== 'false',
+    // DEV ONLY: log what was heard and answered (private conversation content!). Default off.
+    debugLogText: process.env.ASSISTANT_DEBUG_LOG_TEXT === 'true',
+    ttsModel: process.env.ASSISTANT_TTS_MODEL ?? 'gpt-4o-mini-tts',
+    ttsVoice: process.env.ASSISTANT_TTS_VOICE ?? 'alloy',
   },
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? '',

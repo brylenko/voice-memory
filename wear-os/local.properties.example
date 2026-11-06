@@ -1,0 +1,9 @@
+# Copy to local.properties (git-ignored) and fill in.
+sdk.dir=/path/to/Android/sdk
+
+# Backend base URL reachable from the watch (https in production!)
+voicememory.baseUrl=https://voice-memory.example.com
+# Must equal DEVICE_HMAC_SECRET on the backend
+voicememory.hmacSecret=change-me
+# Optional BCP-47 hint for speech recognition (uk, ru, en...). Empty = auto.
+voicememory.language=

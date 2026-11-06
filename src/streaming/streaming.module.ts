@@ -1,14 +1,15 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AudioTrackEntity } from '../audio-track/audio-track.entity';
 import { AudioChunkRepository } from '../audio-chunk/audio-chunk.repository';
+import { UserModule } from '../user/user.module';
 import { StreamingGateway } from './streaming.gateway';
 import { WsHmacAuthService } from './ws-hmac-auth.service';
-import { UserEntity } from '../user/user.entity';
+import { LiveTrackService } from './live-track.service';
 
 @Module({
-  imports: [ConfigModule, TypeOrmModule.forFeature([AudioTrackEntity, UserEntity])],
-  providers: [StreamingGateway, AudioChunkRepository, WsHmacAuthService],
+  imports: [UserModule, TypeOrmModule.forFeature([AudioTrackEntity])],
+  providers: [StreamingGateway, AudioChunkRepository, WsHmacAuthService, LiveTrackService],
+  exports: [WsHmacAuthService, LiveTrackService],
 })
 export class StreamingModule {}

@@ -12,6 +12,17 @@ import { OpenAiChatCompletionAdapter } from './adapters/openai-chat-completion.a
 import { OpenAiSummarizationAdapter } from './adapters/openai-summarization.adapter';
 import { OpenAiIntentClassifierAdapter } from './adapters/openai-intent-classifier.adapter';
 import { OpenAiStreamingTranscriptionAdapter } from './adapters/openai-streaming-transcription.adapter';
+import { UTTERANCE_TRANSCRIPTION_PORT } from './ports/utterance-transcription.port';
+import { CHAT_STREAM_PORT } from './ports/chat-stream.port';
+import { OpenAiUtteranceTranscriptionAdapter } from './adapters/openai-utterance-transcription.adapter';
+import { OpenAiChatStreamAdapter } from './adapters/openai-chat-stream.adapter';
+import { AiAvailabilityService } from './ai-availability';
+import { OpenAiQuotaProbe } from './adapters/openai-quota-probe';
+import { OpenAiWebSearchChatStreamAdapter } from './adapters/openai-web-search-chat-stream.adapter';
+import { ConfigService } from '@nestjs/config';
+import { SPEECH_SYNTHESIS_PORT } from './ports/speech-synthesis.port';
+import { OpenAiSpeechSynthesisAdapter } from './adapters/openai-speech-synthesis.adapter';
+import { OpenAiService } from '../common/services/openai.service';
 
 @Global()
 @Module({
@@ -23,7 +34,43 @@ import { OpenAiStreamingTranscriptionAdapter } from './adapters/openai-streaming
     { provide: SUMMARIZATION_PORT, useClass: OpenAiSummarizationAdapter },
     { provide: INTENT_CLASSIFIER_PORT, useClass: OpenAiIntentClassifierAdapter },
     { provide: STREAMING_TRANSCRIPTION_PORT, useClass: OpenAiStreamingTranscriptionAdapter },
+    { provide: UTTERANCE_TRANSCRIPTION_PORT, useClass: OpenAiUtteranceTranscriptionAdapter },
+    OpenAiChatStreamAdapter,
+    {
+      provide: SPEECH_SYNTHESIS_PORT,
+      inject: [ConfigService, OpenAiService, AiAvailabilityService],
+      useFactory: (config: ConfigService, openai: OpenAiService, availability: AiAvailabilityService) =>
+        new OpenAiSpeechSynthesisAdapter(openai.client, availability, {
+          model: config.get<string>('assistant.ttsModel') ?? 'gpt-4o-mini-tts',
+          voice: config.get<string>('assistant.ttsVoice') ?? 'alloy',
+        }),
+    },
+    {
+      // Strategy: assistant answers with web search (current prices, news...) unless disabled.
+      provide: CHAT_STREAM_PORT,
+      inject: [ConfigService, OpenAiService, AiAvailabilityService, OpenAiChatStreamAdapter],
+      useFactory: (
+        config: ConfigService,
+        openai: OpenAiService,
+        availability: AiAvailabilityService,
+        plain: OpenAiChatStreamAdapter,
+      ) => config.get<boolean>('assistant.webSearch')
+        ? new OpenAiWebSearchChatStreamAdapter(openai.client, availability, {
+          model: config.get<string>('assistant.model') ?? 'gpt-4o-mini',
+          toolType: config.get<string>('assistant.webSearchTool') ?? 'web_search',
+          country: config.get<string>('assistant.searchCountry') || undefined,
+        })
+        : plain,
+    },
+    { provide: AiAvailabilityService, useFactory: () => new AiAvailabilityService() },
+    {
+      provide: OpenAiQuotaProbe,
+      inject: [OpenAiService, AiAvailabilityService],
+      useFactory: (openai: OpenAiService, availability: AiAvailabilityService) => new OpenAiQuotaProbe(openai, availability),
+    },
   ],
-  exports: [TRANSCRIPTION_PORT, EMBEDDING_PORT, CHAT_COMPLETION_PORT, SUMMARIZATION_PORT, INTENT_CLASSIFIER_PORT, STREAMING_TRANSCRIPTION_PORT],
+  exports: [TRANSCRIPTION_PORT, EMBEDDING_PORT, CHAT_COMPLETION_PORT, SUMMARIZATION_PORT, INTENT_CLASSIFIER_PORT, STREAMING_TRANSCRIPTION_PORT,
+    UTTERANCE_TRANSCRIPTION_PORT, CHAT_STREAM_PORT, AiAvailabilityService, OpenAiQuotaProbe,
+    SPEECH_SYNTHESIS_PORT],
 })
 export class AiModule {}
