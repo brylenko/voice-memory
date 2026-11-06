@@ -29,4 +29,6 @@
     <string name="transport_pref_live">Transport: Always live</string>
     <string name="transport_pref_offline">Transport: Always offline</string>
     <string name="now">now</string>
+    <string name="assist_empty_auto">Speak — answers appear here</string>
+    <string name="assist_empty_manual">Tap ✨ to get an answer about what was just said</string>
 </resources>

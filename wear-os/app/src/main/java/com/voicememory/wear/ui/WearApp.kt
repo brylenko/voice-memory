@@ -76,7 +76,7 @@ fun WearApp(
 
 /** Shared screen chrome: time on top, rotary-scrollable list with position indicator. */
 @Composable
-private fun WatchList(content: ScalingLazyListScope.() -> Unit) {
+internal fun WatchList(content: ScalingLazyListScope.() -> Unit) {
     val listState = rememberScalingLazyListState()
     Scaffold(
         timeText = { TimeText() },
@@ -187,86 +187,6 @@ private fun HomeScreen(
     }
 }
 
-@SuppressLint("MissingPermission") // guarded by micGranted
-@Composable
-private fun AssistScreen(
-    micGranted: Boolean,
-    requestMic: () -> Unit,
-    keepScreenOn: (Boolean) -> Unit,
-    onFinished: () -> Unit,
-    vm: AssistViewModel = viewModel(),
-) {
-    val state by vm.state.collectAsStateWithLifecycle()
-    val speak by vm.speak.collectAsStateWithLifecycle()
-
-    LaunchedEffect(micGranted) { if (micGranted) vm.start() else requestMic() }
-    DisposableEffect(Unit) {
-        keepScreenOn(true)
-        onDispose { keepScreenOn(false) }
-    }
-    LaunchedEffect(state.status) { if (state.status == ConnectionStatus.DONE) onFinished() }
-
-    WatchList {
-        item {
-            Text(
-                text = when (state.status) {
-                    ConnectionStatus.CONNECTING -> stringResource(R.string.connecting)
-                    ConnectionStatus.ERROR -> stringResource(R.string.error_prefix, state.error ?: "?")
-                    else -> state.caption.ifBlank { stringResource(R.string.listening) }
-                },
-                style = MaterialTheme.typography.caption2,
-                color = MaterialTheme.colors.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                maxLines = 3,
-                modifier = Modifier.padding(horizontal = 12.dp),
-            )
-        }
-        answers(state.answers.map { it.text to it.done })
-        item {
-            Chip(
-                modifier = Modifier.fillMaxWidth(),
-                onClick = vm::ask,
-                enabled = state.status == ConnectionStatus.LISTENING,
-                label = { Text(stringResource(R.string.ask)) },
-                colors = ChipDefaults.primaryChipColors(),
-            )
-        }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                CompactChip(
-                    onClick = vm::toggleMode,
-                    label = {
-                        Text(stringResource(if (state.mode == AssistMode.AUTO) R.string.auto else R.string.manual))
-                    },
-                )
-                CompactChip(
-                    onClick = vm::toggleSpeak,
-                    label = { Text((if (speak) "🔊 " else "🔇 ") + stringResource(R.string.speak)) },
-                )
-            }
-        }
-        item {
-            CompactChip(
-                onClick = { if (state.status == ConnectionStatus.ERROR) onFinished() else vm.stop() },
-                label = { Text(stringResource(R.string.stop)) },
-                colors = ChipDefaults.secondaryChipColors(),
-            )
-        }
-    }
-}
-
-private fun ScalingLazyListScope.answers(answers: List<Pair<String, Boolean>>) {
-    items(answers) { (text, done) ->
-        Text(
-            text = text.ifBlank { "…" },
-            style = MaterialTheme.typography.body1,
-            fontWeight = if (done) FontWeight.Normal else FontWeight.Medium,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 8.dp),
-        )
-    }
-}
-
 @Composable
 private fun TodayScreen(vm: TodayViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
@@ -278,7 +198,7 @@ private fun TodayScreen(vm: TodayViewModel = viewModel()) {
             is TodayState.Failed -> item {
                 Chip(
                     onClick = vm::refresh,
-                    label = { Text(stringResource(R.string.error_prefix, s.message), maxLines = 3) },
+                    label = { Text(stringResource(R.string.error_prefix, s.message), maxLines = 5) },
                     colors = ChipDefaults.secondaryChipColors(),
                 )
             }

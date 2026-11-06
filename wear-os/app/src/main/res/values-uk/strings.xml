@@ -28,4 +28,6 @@
     <string name="transport_pref_live">Режим: Завжди наживо</string>
     <string name="transport_pref_offline">Режим: Завжди офлайн</string>
     <string name="now">зараз</string>
+    <string name="assist_empty_auto">Говоріть — відповідь з\'явиться тут</string>
+    <string name="assist_empty_manual">Натисніть ✨, щоб отримати відповідь на сказане</string>
 </resources>
