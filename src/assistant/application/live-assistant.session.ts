@@ -90,6 +90,7 @@ export class LiveAssistantSession {
     if (this.echo.isEcho(text)) {
       // Our own spoken answer came back through the microphone — never answer it.
       this.deps.trace?.('ignored echo of a recent answer');
+      this.deps.debugText?.(`ignored as echo: ${text.trim()}`);
       return;
     }
     this.window.add({ id, text: text.trim(), at });

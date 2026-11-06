@@ -29,4 +29,16 @@ describe('EchoGuard', () => {
     expect(g.isEcho('что')).toBe(false);
     expect(g.isEcho('декоратор')).toBe(false); // not in the answer → a real new question
   });
+
+  it('a follow-up question reusing the answer\'s words is never an echo', () => {
+    const g = new EchoGuard();
+    g.rememberAnswer('Сегодня вы обсуждали перенос демо на вторник и бюджет проекта.');
+    expect(g.isEcho('Что я сегодня обсуждал про перенос демо на вторник?')).toBe(false);
+  });
+
+  it('partial overlap below 80% is not an echo', () => {
+    const g = new EchoGuard();
+    g.rememberAnswer('Ирригатор стоит от 1500 до 3000 гривен в Розетке.');
+    expect(g.isEcho('ирригатор стоит дорого в розетке или нет')).toBe(false);
+  });
 });

@@ -10,8 +10,8 @@ export class EchoGuard {
   private readonly recent: Array<{ words: Set<string>; at: number }> = [];
 
   constructor(
-    private readonly windowMs = 30_000,
-    private readonly overlapThreshold = 0.6,
+    private readonly windowMs = 15_000,
+    private readonly overlapThreshold = 0.8,
     private readonly now: () => number = Date.now,
   ) {}
 
@@ -23,6 +23,9 @@ export class EchoGuard {
   }
 
   isEcho(utterance: string): boolean {
+    // Answers are statements; a question is the user asking (again) — never an echo,
+    // even when it reuses the answer's words ("а что ещё про Facade?").
+    if (/[?？]\s*$/.test(utterance.trim())) return false;
     const words = tokenize(utterance);
     if (words.size === 0) return false;
     // A single word is an echo only if it's a distinctive word from a recent answer
