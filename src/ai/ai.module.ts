@@ -18,6 +18,8 @@ import { OpenAiUtteranceTranscriptionAdapter } from './adapters/openai-utterance
 import { OpenAiChatStreamAdapter } from './adapters/openai-chat-stream.adapter';
 import { AiAvailabilityService } from './ai-availability';
 import { OpenAiQuotaProbe } from './adapters/openai-quota-probe';
+import { OpenAiWebSearchChatStreamAdapter } from './adapters/openai-web-search-chat-stream.adapter';
+import { ConfigService } from '@nestjs/config';
 import { OpenAiService } from '../common/services/openai.service';
 
 @Global()
@@ -31,7 +33,24 @@ import { OpenAiService } from '../common/services/openai.service';
     { provide: INTENT_CLASSIFIER_PORT, useClass: OpenAiIntentClassifierAdapter },
     { provide: STREAMING_TRANSCRIPTION_PORT, useClass: OpenAiStreamingTranscriptionAdapter },
     { provide: UTTERANCE_TRANSCRIPTION_PORT, useClass: OpenAiUtteranceTranscriptionAdapter },
-    { provide: CHAT_STREAM_PORT, useClass: OpenAiChatStreamAdapter },
+    OpenAiChatStreamAdapter,
+    {
+      // Strategy: assistant answers with web search (current prices, news...) unless disabled.
+      provide: CHAT_STREAM_PORT,
+      inject: [ConfigService, OpenAiService, AiAvailabilityService, OpenAiChatStreamAdapter],
+      useFactory: (
+        config: ConfigService,
+        openai: OpenAiService,
+        availability: AiAvailabilityService,
+        plain: OpenAiChatStreamAdapter,
+      ) => config.get<boolean>('assistant.webSearch')
+        ? new OpenAiWebSearchChatStreamAdapter(openai.client, availability, {
+          model: 'gpt-4o-mini',
+          toolType: config.get<string>('assistant.webSearchTool') ?? 'web_search',
+          country: config.get<string>('assistant.searchCountry') || undefined,
+        })
+        : plain,
+    },
     { provide: AiAvailabilityService, useFactory: () => new AiAvailabilityService() },
     {
       provide: OpenAiQuotaProbe,

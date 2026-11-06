@@ -32,6 +32,12 @@ export default () => ({
   assistant: {
     // Ground live answers in what the watch heard earlier (one embedding + pgvector query per answer).
     memoryLookup: process.env.ASSISTANT_MEMORY_LOOKUP !== 'false',
+    // Let the assistant search the web for current facts (prices, news, weather). The model
+    // only searches when needed; each search is billed separately by OpenAI.
+    webSearch: process.env.ASSISTANT_WEB_SEARCH !== 'false',
+    webSearchTool: process.env.ASSISTANT_WEB_SEARCH_TOOL ?? 'web_search',
+    // ISO country for local results (currency, shops), e.g. UA. Empty = no location hint.
+    searchCountry: process.env.ASSISTANT_SEARCH_COUNTRY ?? '',
   },
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? '',

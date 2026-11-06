@@ -14,6 +14,9 @@ const BASE_RULES = [
   `Keep every answer to at most 2 short sentences (under ${MAX_ANSWER_CHARS} characters): it is read at a glance on a small round screen.`,
   'No preamble, no markdown, no lists. Answer in the language of the conversation.',
   'If "Personal memory" contains something relevant, use it and say when it was heard. Never invent personal facts.',
+  'You can search the web. Do it for anything current or local: prices, availability, news, weather, schedules,',
+  'exchange rates, opening hours — and always when asked to look something up ("посмотри в интернете", "найди", "сколько стоит").',
+  'For prices give a concrete range with currency and one shop or source name. Never output links or URLs.',
 ];
 
 const AUTO_RULES = [
@@ -21,6 +24,7 @@ const AUTO_RULES = [
   'translation, calculation, or a claim that is clearly wrong. A bare term, name, brand or place said on its own',
   '(e.g. "доминос", "кислота", "Kubernetes") is an implicit "what is this?" → explain it in one sentence.',
   'Small talk, greetings and statements that need no help do NOT deserve a hint.',
+  'A request to look something up or to find a price is always worth answering.',
   `If no hint is useful, reply with exactly ${SKIP_TOKEN} and nothing else.`,
 ];
 
