@@ -38,6 +38,11 @@ export default () => ({
     webSearchTool: process.env.ASSISTANT_WEB_SEARCH_TOOL ?? 'web_search',
     // ISO country for local results (currency, shops), e.g. UA. Empty = no location hint.
     searchCountry: process.env.ASSISTANT_SEARCH_COUNTRY ?? '',
+    // Server-side voice for answers (natural, multilingual) streamed to the watch as PCM.
+    // When off, the watch falls back to its own (offline) TTS engine.
+    serverTts: process.env.ASSISTANT_SERVER_TTS !== 'false',
+    ttsModel: process.env.ASSISTANT_TTS_MODEL ?? 'gpt-4o-mini-tts',
+    ttsVoice: process.env.ASSISTANT_TTS_VOICE ?? 'alloy',
   },
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN ?? '',
