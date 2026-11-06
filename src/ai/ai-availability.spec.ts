@@ -32,6 +32,11 @@ describe('quota error helpers', () => {
     expect(isQuotaError({ status: 429, code: 'rate_limit_exceeded' })).toBe(false);
   });
 
+  it('recognises the realtime shape seen in production logs', () => {
+    expect(isQuotaError({ type: 'insufficient_quota', code: 'credit_balance_exhausted', message: 'no credits' })).toBe(true);
+    expect(isQuotaError({ type: 'invalid_request_error', code: 'invalid_value' })).toBe(false);
+  });
+
   it('maps only AiUnavailableError to the wire code', () => {
     expect(aiErrorCode(new AiUnavailableError())).toBe('ai_unavailable');
     expect(aiErrorCode(new Error('x'))).toBeUndefined();

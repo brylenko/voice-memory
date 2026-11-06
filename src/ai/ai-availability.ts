@@ -9,10 +9,17 @@ export class AiUnavailableError extends Error {
   }
 }
 
-/** OpenAI signals "no credits" as HTTP 429 with code `insufficient_quota` (plain 429 = rate limit, retryable). */
+const QUOTA_MARKERS = new Set(['insufficient_quota', 'credit_balance_exhausted']);
+
+/**
+ * "No credits" (not retryable soon) vs a plain 429 rate limit (retryable).
+ * OpenAI is inconsistent about where it puts the marker: REST errors use
+ * `code: insufficient_quota`, realtime events send
+ * `{ type: 'insufficient_quota', code: 'credit_balance_exhausted' }`.
+ */
 export function isQuotaError(err: unknown): boolean {
-  const e = err as { status?: number; code?: string; error?: { code?: string } } | undefined;
-  return e?.code === 'insufficient_quota' || e?.error?.code === 'insufficient_quota';
+  const e = err as { code?: string; type?: string; error?: { code?: string; type?: string } } | undefined;
+  return [e?.code, e?.type, e?.error?.code, e?.error?.type].some((v) => v !== undefined && QUOTA_MARKERS.has(v));
 }
 
 /** Wire-level code for clients, or undefined when the error is not an AI-availability problem. */

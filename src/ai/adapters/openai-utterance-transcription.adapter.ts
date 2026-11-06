@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import WebSocket from 'ws';
 import type { Readable } from 'stream';
 import { AsyncQueue } from '../../common/services/async-queue';
-import { AiAvailabilityService, AiUnavailableError } from '../ai-availability';
+import { AiAvailabilityService, AiUnavailableError, isQuotaError } from '../ai-availability';
 import type {
   UtteranceEvent,
   UtteranceTranscriptionOptions,
@@ -128,9 +128,9 @@ export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscripti
           const err = event.error as { code?: string; message?: string } | undefined;
           this.logger.error(`← transcription failed: ${JSON.stringify(err)}`);
           partials.delete(itemId);
-          if (err?.code === 'insufficient_quota') {
+          if (isQuotaError(err)) {
             this.availability.markUnavailable();
-            queue.fail(new AiUnavailableError(err.message));
+            queue.fail(new AiUnavailableError(err?.message));
             close();
           }
           return;
@@ -167,9 +167,9 @@ export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscripti
             return;
           }
           this.logger.error(`Realtime error: ${JSON.stringify(err)}`);
-          if (err?.code === 'insufficient_quota') {
+          if (isQuotaError(err)) {
             this.availability.markUnavailable();
-            queue.fail(new AiUnavailableError(err.message));
+            queue.fail(new AiUnavailableError(err?.message));
           } else {
             queue.fail(new Error(err?.message ?? 'Realtime transcription error'));
           }
@@ -189,7 +189,7 @@ export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscripti
       res.on('data', (c: Buffer) => { body += c.toString(); });
       res.on('end', () => {
         this.logger.error(`Realtime handshake rejected: HTTP ${status}`);
-        if (status === 429 && body.includes('insufficient_quota')) {
+        if (status === 429 && (body.includes('insufficient_quota') || body.includes('credit_balance_exhausted'))) {
           this.availability.markUnavailable();
           queue.fail(new AiUnavailableError());
         } else {
