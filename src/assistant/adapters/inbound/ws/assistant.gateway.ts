@@ -12,6 +12,7 @@ import { DeviceUserResolver } from '../../../../user/device-user.resolver';
 import { LiveTrackService } from '../../../../streaming/live-track.service';
 import { WsAuthError, WsHmacAuthService } from '../../../../streaming/ws-hmac-auth.service';
 import { LiveAssistantFactory } from '../../../application/live-assistant.factory';
+import { aiErrorCode } from '../../../../ai/ai-availability';
 import type {
   AssistantEvent,
   AssistantMode,
@@ -24,7 +25,7 @@ type ServerEvent =
   | { type: 'partial'; id: string; text: string }
   | { type: 'utterance'; id: string; text: string }
   | { type: 'done'; trackId?: string }
-  | { type: 'error'; message: string; paymentUrl?: string };
+  | { type: 'error'; message: string; paymentUrl?: string; code?: 'ai_unavailable' };
 
 interface Connection {
   audio: Readable;
@@ -191,7 +192,10 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
     } catch (err) {
       this.logger.error('Assistant session error', err as Error);
       if (trackId) await this.liveTracks.markFailed(trackId, transcript.join('\n')).catch(() => undefined);
-      this.send(client, { type: 'error', message: 'Live transcription failed' });
+      const code = aiErrorCode(err);
+      this.send(client, code
+        ? { type: 'error', code, message: 'AI is unavailable (provider quota exhausted)' }
+        : { type: 'error', message: 'Live transcription failed' });
     } finally {
       conn.assistant?.close();
       this.connections.delete(client);

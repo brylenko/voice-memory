@@ -16,6 +16,9 @@ import { UTTERANCE_TRANSCRIPTION_PORT } from './ports/utterance-transcription.po
 import { CHAT_STREAM_PORT } from './ports/chat-stream.port';
 import { OpenAiUtteranceTranscriptionAdapter } from './adapters/openai-utterance-transcription.adapter';
 import { OpenAiChatStreamAdapter } from './adapters/openai-chat-stream.adapter';
+import { AiAvailabilityService } from './ai-availability';
+import { OpenAiQuotaProbe } from './adapters/openai-quota-probe';
+import { OpenAiService } from '../common/services/openai.service';
 
 @Global()
 @Module({
@@ -29,8 +32,14 @@ import { OpenAiChatStreamAdapter } from './adapters/openai-chat-stream.adapter';
     { provide: STREAMING_TRANSCRIPTION_PORT, useClass: OpenAiStreamingTranscriptionAdapter },
     { provide: UTTERANCE_TRANSCRIPTION_PORT, useClass: OpenAiUtteranceTranscriptionAdapter },
     { provide: CHAT_STREAM_PORT, useClass: OpenAiChatStreamAdapter },
+    { provide: AiAvailabilityService, useFactory: () => new AiAvailabilityService() },
+    {
+      provide: OpenAiQuotaProbe,
+      inject: [OpenAiService, AiAvailabilityService],
+      useFactory: (openai: OpenAiService, availability: AiAvailabilityService) => new OpenAiQuotaProbe(openai, availability),
+    },
   ],
   exports: [TRANSCRIPTION_PORT, EMBEDDING_PORT, CHAT_COMPLETION_PORT, SUMMARIZATION_PORT, INTENT_CLASSIFIER_PORT, STREAMING_TRANSCRIPTION_PORT,
-    UTTERANCE_TRANSCRIPTION_PORT, CHAT_STREAM_PORT],
+    UTTERANCE_TRANSCRIPTION_PORT, CHAT_STREAM_PORT, AiAvailabilityService, OpenAiQuotaProbe],
 })
 export class AiModule {}

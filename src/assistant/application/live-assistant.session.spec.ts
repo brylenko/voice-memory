@@ -2,6 +2,7 @@ import type { ChatMessage } from '../../ai/ports/chat-completion.port';
 import type { ChatStreamPort } from '../../ai/ports/chat-stream.port';
 import { AssistantEvent, LiveAssistantSession } from './live-assistant.session';
 import type { MemoryContextPort } from './ports/memory-context.port';
+import { AiUnavailableError } from '../../ai/ai-availability';
 
 async function* stream(parts: string[], delayMs = 0): AsyncIterable<string> {
   for (const p of parts) {
@@ -115,6 +116,19 @@ describe('LiveAssistantSession', () => {
     await session.idle();
 
     expect(events).toEqual([expect.objectContaining({ type: 'answer.error' })]);
+  });
+
+  it('tags provider quota failures with ai_unavailable so the watch can pause', async () => {
+    const chat: ChatStreamPort = {
+      // eslint-disable-next-line require-yield
+      stream: async function* () { throw new AiUnavailableError(); },
+    };
+    const { session, events } = makeSession({ chat });
+
+    session.onUtterance('1', 'Who won?');
+    await session.idle();
+
+    expect(events).toEqual([expect.objectContaining({ type: 'answer.error', code: 'ai_unavailable' })]);
   });
 
   it('stops emitting after close()', async () => {

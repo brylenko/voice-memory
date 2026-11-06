@@ -21,10 +21,11 @@ import { DeviceUserResolver } from '../user/device-user.resolver';
 import { finalUtterancesAsDeltas, LiveSessionOptions, parseLiveSessionOptions } from './live-session-options';
 import { LiveTrackService } from './live-track.service';
 import { WsHmacAuthService, WsAuthError } from './ws-hmac-auth.service';
+import { aiErrorCode } from '../ai/ai-availability';
 
 interface TranscriptDelta   { type: 'transcript'; text: string; }
 interface DoneEvent         { type: 'done'; fullText: string; trackId: string; }
-interface ErrorEvent        { type: 'error'; message: string; paymentUrl?: string; }
+interface ErrorEvent        { type: 'error'; message: string; paymentUrl?: string; code?: 'ai_unavailable'; }
 type ServerEvent = TranscriptDelta | DoneEvent | ErrorEvent;
 
 /**
@@ -194,7 +195,9 @@ export class StreamingGateway implements OnGatewayConnection, OnGatewayDisconnec
       this.sessions.delete(client);
       await this.liveTracks.markFailed(trackId, deltas.join(''));
       this.logger.error('Streaming transcription error', err as Error);
-      this.send(client, { type: 'error', message: (err as Error).message });
+      // `code` is additive: existing clients keep reading `message` as before.
+      const code = aiErrorCode(err);
+      this.send(client, { type: 'error', message: (err as Error).message, ...(code ? { code } : {}) });
     }
   }
 

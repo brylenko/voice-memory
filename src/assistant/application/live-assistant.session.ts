@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { ChatStreamPort } from '../../ai/ports/chat-stream.port';
 import { gateAnswer } from './answer-gate';
+import { aiErrorCode } from '../../ai/ai-availability';
 import { buildAssistantMessages, MAX_ANSWER_CHARS } from './assistant-prompt';
 import { ConversationWindow } from './conversation-window';
 import type { MemoryContextPort, MemoryFact } from './ports/memory-context.port';
@@ -15,7 +16,7 @@ export type AssistantEvent =
   | { type: 'answer.start'; id: string; inReplyTo: string }
   | { type: 'answer.delta'; id: string; text: string }
   | { type: 'answer.done'; id: string; text: string }
-  | { type: 'answer.error'; id: string; message: string };
+  | { type: 'answer.error'; id: string; message: string; code?: 'ai_unavailable' };
 
 export interface LiveAssistantDeps {
   chat: ChatStreamPort;
@@ -140,7 +141,15 @@ export class LiveAssistantSession {
       }
     } catch (err) {
       this.deps.log?.(`answer failed: ${(err as Error).message}`);
-      if (!this.closed) this.emit({ type: 'answer.error', id: answerId, message: 'Could not generate an answer' });
+      if (!this.closed) {
+        const code = aiErrorCode(err);
+        this.emit({
+          type: 'answer.error',
+          id: answerId,
+          message: code ? 'AI is unavailable (provider quota exhausted)' : 'Could not generate an answer',
+          ...(code ? { code } : {}),
+        });
+      }
     }
   }
 

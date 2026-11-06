@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import WebSocket from 'ws';
 import type { Readable } from 'stream';
 import { AsyncQueue } from '../../common/services/async-queue';
+import { AiAvailabilityService, AiUnavailableError } from '../ai-availability';
 import type {
   UtteranceEvent,
   UtteranceTranscriptionOptions,
@@ -26,7 +27,7 @@ export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscripti
   private readonly apiKey: string;
   private readonly model: string;
 
-  constructor(config: ConfigService) {
+  constructor(config: ConfigService, private readonly availability: AiAvailabilityService) {
     this.apiKey = config.get<string>('openaiApiKey') ?? '';
     // Must be a model that supports server-side turn detection: gpt-realtime-whisper
     // rejects `turn_detection` ("Turn detection is not supported for this transcription model").
@@ -144,7 +145,12 @@ export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscripti
             return;
           }
           this.logger.error(`Realtime error: ${JSON.stringify(err)}`);
-          queue.fail(new Error(err?.message ?? 'Realtime transcription error'));
+          if (err?.code === 'insufficient_quota') {
+            this.availability.markUnavailable();
+            queue.fail(new AiUnavailableError(err.message));
+          } else {
+            queue.fail(new Error(err?.message ?? 'Realtime transcription error'));
+          }
           close();
           return;
         }
@@ -154,6 +160,22 @@ export class OpenAiUtteranceTranscriptionAdapter implements UtteranceTranscripti
     let audioBytes = 0;
     audioStream.on('data', (chunk: Buffer) => { audioBytes += chunk.length; });
 
+    // Handshake refused (e.g. HTTP 429 when the account has no credits) never reaches 'message'.
+    ws.on('unexpected-response', (_req, res) => {
+      const status = res.statusCode ?? 0;
+      let body = '';
+      res.on('data', (c: Buffer) => { body += c.toString(); });
+      res.on('end', () => {
+        this.logger.error(`Realtime handshake rejected: HTTP ${status}`);
+        if (status === 429 && body.includes('insufficient_quota')) {
+          this.availability.markUnavailable();
+          queue.fail(new AiUnavailableError());
+        } else {
+          queue.fail(new Error(`Realtime handshake rejected: HTTP ${status}`));
+        }
+        close();
+      });
+    });
     ws.on('error', (err) => { this.logger.error(`Realtime WS error: ${err.message}`); queue.fail(err); close(); });
     ws.on('close', (code, reason) => {
       this.logger.log(`← Realtime WS closed (code=${code}${reason.length ? `, reason=${reason.toString()}` : ''}, audio received=${Math.round(audioBytes / 48_000)}s)`);
