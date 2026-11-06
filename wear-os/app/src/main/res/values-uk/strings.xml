@@ -34,4 +34,5 @@
     <string name="ai_unavailable_memory">⚠ ШІ недоступний — запис зберігається на годиннику</string>
     <string name="tts_no_engine">Озвучка недоступна: на годиннику немає рушія синтезу мовлення</string>
     <string name="tts_no_voice">Немає голосу для цієї мови — встановіть у Налаштуваннях → Синтез мовлення</string>
+    <string name="quick_assist_label">VM Асистент</string>
 </resources>

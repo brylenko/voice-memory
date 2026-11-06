@@ -55,9 +55,17 @@ fun WearApp(
     micGranted: Boolean,
     requestMic: () -> Unit,
     keepScreenOn: (Boolean) -> Unit,
+    assistRequests: Int = 0,
 ) {
     MaterialTheme {
         val nav = rememberSwipeDismissableNavController()
+        // Quick action (watch key / assistant gesture): go straight to the assistant, which
+        // starts listening on its own. Keyed on a counter so every press triggers again.
+        LaunchedEffect(assistRequests) {
+            if (assistRequests > 0 && nav.currentDestination?.route != Routes.ASSIST) {
+                nav.navigate(Routes.ASSIST) { launchSingleTop = true }
+            }
+        }
         SwipeDismissableNavHost(navController = nav, startDestination = Routes.HOME) {
             composable(Routes.HOME) {
                 HomeScreen(

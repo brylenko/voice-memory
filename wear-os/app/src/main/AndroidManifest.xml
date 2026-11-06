@@ -36,6 +36,7 @@
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:taskAffinity=""
             android:theme="@android:style/Theme.DeviceDefault">
             <intent-filter>
@@ -43,6 +44,30 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Quick action: a second launcher entry that opens straight into the assistant and
+             starts listening. Assign it to the watch key: Settings → Advanced features →
+             Customize keys → Double press. ASSIST / VOICE_COMMAND let the system offer it as a
+             voice assistant where the firmware allows (e.g. press-and-hold). -->
+        <activity-alias
+            android:name=".QuickAssist"
+            android:exported="true"
+            android:icon="@drawable/ic_quick_assist"
+            android:label="@string/quick_assist_label"
+            android:targetActivity=".ui.MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
 
         <service
             android:name=".memory.MemoryRecorderService"

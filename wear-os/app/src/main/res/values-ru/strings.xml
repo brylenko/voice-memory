@@ -34,4 +34,5 @@
     <string name="ai_unavailable_memory">⚠ ИИ недоступен — запись хранится на часах</string>
     <string name="tts_no_engine">Озвучка недоступна: на часах нет движка синтеза речи</string>
     <string name="tts_no_voice">Нет голоса для этого языка — установите в Настройках → Синтез речи</string>
+    <string name="quick_assist_label">VM Ассистент</string>
 </resources>
