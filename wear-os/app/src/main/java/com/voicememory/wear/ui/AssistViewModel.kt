@@ -14,6 +14,9 @@ import com.voicememory.wear.memory.MemoryRecorderService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 class AssistViewModel(app: Application) : AndroidViewModel(app) {
     private val container = AppContainer.get(app)
@@ -33,6 +36,15 @@ class AssistViewModel(app: Application) : AndroidViewModel(app) {
 
     private var started = false
 
+    init {
+        // `ready` tells us whether the server speaks; switch local TTS off as soon as it does.
+        viewModelScope.launch {
+            session.state.map { it.serverTts }.distinctUntilChanged().collect { server ->
+                feedback.speak = _speak.value && !server
+            }
+        }
+    }
+
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start(mode: AssistMode = AssistMode.AUTO, save: Boolean = true) {
         if (started) return
@@ -50,8 +62,11 @@ class AssistViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun toggleSpeak() {
-        _speak.value = !_speak.value
-        feedback.speak = _speak.value
+        val on = !_speak.value
+        _speak.value = on
+        session.setSpeak(on)
+        // Local (watch) TTS only when the server can't speak; never both at once.
+        feedback.speak = on && !state.value.serverTts
     }
 
     fun stop() = session.stop()

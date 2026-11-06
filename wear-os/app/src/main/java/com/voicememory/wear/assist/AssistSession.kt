@@ -4,6 +4,7 @@ import android.Manifest
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import com.voicememory.wear.audio.PcmRecorder
+import com.voicememory.wear.audio.VoiceActivityDetector
 import com.voicememory.wear.audio.toLittleEndianBytes
 import com.voicememory.wear.memory.AiAvailability
 import com.voicememory.wear.net.VoiceMemoryApi
@@ -35,6 +36,9 @@ class AssistSession(
     /** While true (our answer is being spoken) mic audio is not sent: prevents echo loops. */
     private val micMuted: () -> Boolean = { false },
 ) {
+    private val player = SpeechPlayer()
+    private val gate = SpeechGate(VoiceActivityDetector(hangoverFrames = 3)::isSpeech)
+    @Volatile private var speakWanted = false
     private val _state = MutableStateFlow(AssistState())
     val state: StateFlow<AssistState> = _state.asStateFlow()
 
@@ -48,16 +52,23 @@ class AssistSession(
         micJob = scope.launch(Dispatchers.Default) { // PCM → bytes off the main thread
             // Frames are streamed immediately; the server buffers them until auth completes.
             PcmRecorder.frames(SAMPLE_RATE, FRAME_MS).collect { frame ->
-                // Send silence instead of dropping frames: the server's VAD still sees the
-                // turn end, and the realtime session timeline stays continuous.
-                val pcm = if (micMuted()) SILENCE else frame.toLittleEndianBytes()
-                socket?.send(pcm.toByteString())
+                // Only speech (+ pre-roll and a short tail) leaves the watch: realtime
+                // transcription is billed per second received, and our own voice is muted.
+                val muted = micMuted() || player.isOutputActive()
+                for (f in gate.accept(frame, muted)) socket?.send(f.toLittleEndianBytes().toByteString())
             }
         }
     }
 
     fun askNow() {
         socket?.send(JSONObject().put("type", "ask").toString())
+    }
+
+    /** Speak answers: with the server voice when available, else the caller's local TTS. */
+    fun setSpeak(enabled: Boolean) {
+        speakWanted = enabled
+        if (!enabled) player.stop()
+        socket?.send(JSONObject().put("type", "speak").put("enabled", enabled).toString())
     }
 
     fun setMode(mode: AssistMode) {
@@ -80,6 +91,7 @@ class AssistSession(
 
     /** Immediate teardown (screen left). */
     fun cancel() {
+        player.release()
         micJob?.cancel()
         micJob = null
         socket?.cancel()
@@ -87,8 +99,20 @@ class AssistSession(
     }
 
     private val listener = object : WebSocketListener() {
+        override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
+            player.write(bytes.toByteArray()) // server voice PCM
+        }
+
         override fun onMessage(webSocket: WebSocket, text: String) {
             val json = runCatching { JSONObject(text) }.getOrNull() ?: return
+            when (json.optString("type")) {
+                "speech.start" -> { player.start(json.getString("id"), json.optInt("sampleRate", 24_000)); return }
+                "speech.end" -> { player.end(json.getString("id")); return }
+                "speech.error" -> { player.stop(); return }
+                "ready" -> if (speakWanted) {
+                    webSocket.send(JSONObject().put("type", "speak").put("enabled", true).toString())
+                }
+            }
             var effect: AssistEventReducer.Effect? = null
             _state.update { current ->
                 val (next, e) = AssistEventReducer.reduce(current, json)
@@ -138,6 +162,5 @@ class AssistSession(
         const val SAMPLE_RATE = 24_000 // backend / Realtime API contract
         const val FRAME_MS = 100
         const val STOP_GRACE_MS = 6_000L
-        val SILENCE = ByteArray(SAMPLE_RATE * FRAME_MS / 1000 * 2)
     }
 }

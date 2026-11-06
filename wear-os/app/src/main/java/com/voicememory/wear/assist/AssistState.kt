@@ -16,4 +16,6 @@ data class AssistState(
     val error: String? = null,
     /** Server reported no AI credits: mic is stopped, nothing would be answered. */
     val aiUnavailable: Boolean = false,
+    /** Server can speak answers itself (natural voice); otherwise the watch's own TTS is used. */
+    val serverTts: Boolean = false,
 )

@@ -17,7 +17,7 @@ object AssistEventReducer {
 
     fun reduce(state: AssistState, json: JSONObject): Pair<AssistState, Effect?> {
         return when (json.optString("type")) {
-            "ready" -> state.copy(status = ConnectionStatus.LISTENING) to null
+            "ready" -> state.copy(status = ConnectionStatus.LISTENING, serverTts = json.optBoolean("serverTts", false)) to null
             "partial" -> state.copy(caption = json.optString("text")) to null
             "utterance" -> state.copy(caption = json.optString("text")) to null
             "answer.start" -> state.copy(
