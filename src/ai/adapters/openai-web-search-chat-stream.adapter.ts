@@ -37,7 +37,9 @@ export class OpenAiWebSearchChatStreamAdapter implements ChatStreamPort {
     try {
       events = (await this.client.responses.create({
         model: this.cfg.model,
-        input: messages.map((m) => ({ role: m.role, content: m.content })),
+        // System rules go to `instructions` (followed more reliably than a system message in `input`).
+        instructions: messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n\n') || undefined,
+        input: messages.filter((m) => m.role !== 'system').map((m) => ({ role: m.role, content: m.content })),
         tools: [tool],
         temperature: options.temperature ?? 0.3,
         stream: true,

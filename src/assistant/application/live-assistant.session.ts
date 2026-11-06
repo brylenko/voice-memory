@@ -5,6 +5,7 @@ import { aiErrorCode } from '../../ai/ai-availability';
 import { buildAssistantMessages, MAX_ANSWER_CHARS } from './assistant-prompt';
 import { ConversationWindow } from './conversation-window';
 import { EchoGuard } from './echo-guard';
+import { stripDeltaMarkup, toPlainText } from './plain-text';
 import type { MemoryContextPort, MemoryFact } from './ports/memory-context.port';
 
 /**
@@ -159,14 +160,16 @@ export class LiveAssistantSession {
           this.emit({ type: 'answer.start', id: answerId, inReplyTo: latest.id });
         }
         answer += delta;
-        this.emit({ type: 'answer.delta', id: answerId, text: delta });
+        const visible = stripDeltaMarkup(delta);
+        if (visible) this.emit({ type: 'answer.delta', id: answerId, text: visible });
         if (answer.length > MAX_ANSWER_CHARS) break; // runaway guard
       }
       if (started && !this.closed) {
-        this.emit({ type: 'answer.done', id: answerId, text: answer.trim() });
-        this.echo.rememberAnswer(answer);
+        const finalText = toPlainText(answer);
+        this.emit({ type: 'answer.done', id: answerId, text: finalText });
+        this.echo.rememberAnswer(finalText);
         this.deps.trace?.(`answered (${answer.trim().length} chars, forced=${forced})`);
-        this.deps.debugText?.(`answer: ${answer.trim()}`);
+        this.deps.debugText?.(`answer: ${finalText}`);
       }
     } catch (err) {
       this.deps.log?.(`answer failed: ${(err as Error).message}`);

@@ -23,10 +23,15 @@ describe('OpenAiWebSearchChatStreamAdapter', () => {
     ]));
     const { adapter } = setup(create, 'UA');
 
-    await expect(collect(adapter.stream([{ role: 'user', content: 'цена ирригатора' }]))).resolves.toBe('1500–3000 грн (Rozetka).');
+    await expect(collect(adapter.stream([
+      { role: 'system', content: 'rules' },
+      { role: 'user', content: 'цена ирригатора' },
+    ]))).resolves.toBe('1500–3000 грн (Rozetka).');
+    expect(create.mock.calls[0][0].instructions).toBe('rules');
     const body = create.mock.calls[0][0];
     expect(body.tools[0]).toMatchObject({ type: 'web_search', user_location: { country: 'UA' } });
     expect(body.stream).toBe(true);
+    expect(body.input.every((m: { role: string }) => m.role !== 'system')).toBe(true);
   });
 
   it('maps a quota failure to AiUnavailableError and flips availability', async () => {
