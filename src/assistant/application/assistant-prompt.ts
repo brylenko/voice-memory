@@ -15,11 +15,18 @@ const BASE_RULES = [
   'You hear the live conversation around the user. The transcript comes from speech recognition and may contain errors.',
   'Speech often mixes languages: an English word or brand may appear transliterated (e.g. "асид" = acid, "доминос" = Domino\'s).',
   'Interpret words by how they sound and answer about what was most likely meant.',
+  'Speech recognition splits one spoken request into several lines when the speaker pauses: all lines marked >> are ONE request.',
   'Answer length depends on what was asked:',
   `- a hint you offer on your own, or a simple factual question: at most 2 short sentences (under ${SHORT_ANSWER_CHARS} characters);`,
-  '- an explicit request to list, describe, explain, compare or give steps ("перечисли", "опиши", "расскажи", "объясни",',
-  `  "назови все", "N пунктов"): answer it COMPLETELY — every item asked for — but compactly, under ${LONG_ANSWER_CHARS} characters.`,
-  '  For lists write one short line per item: "1. Name — what it means". Never replace the requested list with a definition.',
+  '- a request for several items — list, name each, per letter/step/point, describe, explain, compare, give examples',
+  '  ("перечисли", "опиши", "назови", "на каждую букву", "по пунктам", "N пунктов", "какие бывают"): answer COMPLETELY,',
+  `  every item asked for, compactly (under ${LONG_ANSWER_CHARS} characters), one short line per item.`,
+  '  Never replace the requested items with a definition of the topic.',
+  'Examples of correct answers:',
+  '  Q: "дай название паттернов на каждую букву SOLID" → "S — Single Responsibility: один класс — одна причина меняться.',
+  '     O — Open/Closed: открыт для расширения, закрыт для изменения. L — Liskov Substitution: подтип заменяет базовый тип.',
+  '     I — Interface Segregation: узкие интерфейсы вместо одного толстого. D — Dependency Inversion: зависеть от абстракций."',
+  '  Q: "что такое SOLID" → "SOLID — пять принципов ООП-дизайна Роберта Мартина для гибкого и поддерживаемого кода."',
   'No preamble, no markdown (plain numbering is fine). Answer in the language of the conversation.',
   'If "Personal memory" contains something relevant, use it and say when it was heard. Never invent personal facts.',
   'You can search the web. Do it for anything current or local: prices, availability, news, weather, schedules,',
@@ -29,8 +36,8 @@ const BASE_RULES = [
 
 const AUTO_RULES = [
   'Decide whether the LATEST utterance deserves a hint: a question (to anyone), a request for a fact, number, date, definition,',
-  'translation, calculation, or a claim that is clearly wrong. A bare term, name, brand or place said on its own',
-  '(e.g. "доминос", "кислота", "Kubernetes") is an implicit "what is this?" → explain it in one sentence.',
+  'translation, calculation, or a claim that is clearly wrong. Only when the >> request is NOTHING BUT a single term,',
+  'name, brand or place (e.g. just "доминос" or "Kubernetes") treat it as "what is this?" and explain it in one sentence.',
   'Small talk, greetings and statements that need no help do NOT deserve a hint.',
   'A request to look something up or to find a price is always worth answering.',
   `If no hint is useful, reply with exactly ${SKIP_TOKEN} and nothing else.`,
@@ -57,8 +64,9 @@ export function buildAssistantMessages(params: {
     `Current time (UTC): ${fmtDateTime(now)}.`,
   ].join('\n');
 
+  const firstOfRequest = currentRequestStart(conversation);
   const transcript = conversation
-    .map((u, i) => `${i === conversation.length - 1 ? '>>' : '  '} [${fmtTime(u.at)}] ${u.text}`)
+    .map((u, i) => `${i >= firstOfRequest ? '>>' : '  '} [${fmtTime(u.at)}] ${u.text}`)
     .join('\n');
 
   const memoryBlock = memory.length
@@ -72,4 +80,14 @@ export function buildAssistantMessages(params: {
       content: `Personal memory:\n${memoryBlock}\n\nLive conversation (latest marked >>):\n${transcript}`,
     },
   ];
+}
+
+/** Utterances finished within this gap of each other are parts of one spoken request. */
+export const REQUEST_JOIN_GAP_MS = 4_000;
+
+/** Index of the first utterance belonging to the latest request (pauses split one request). */
+export function currentRequestStart(conversation: readonly HeardUtterance[]): number {
+  let i = conversation.length - 1;
+  while (i > 0 && conversation[i].at.getTime() - conversation[i - 1].at.getTime() <= REQUEST_JOIN_GAP_MS) i--;
+  return Math.max(i, 0);
 }

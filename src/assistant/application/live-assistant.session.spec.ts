@@ -23,10 +23,11 @@ function makeSession(opts: {
   chat: ChatStreamPort;
   memory?: MemoryContextPort | null;
   mode?: 'auto' | 'manual';
+  debounceMs?: number;
 }) {
   const events: AssistantEvent[] = [];
   const session = new LiveAssistantSession(
-    { chat: opts.chat, memory: opts.memory ?? null },
+    { chat: opts.chat, memory: opts.memory ?? null, debounceMs: opts.debounceMs ?? 0 },
     { userId: 'u1', mode: opts.mode ?? 'auto' },
     (e) => events.push(e),
   );
@@ -84,6 +85,21 @@ describe('LiveAssistantSession', () => {
     expect(calls).toHaveLength(2);
     expect(calls[1][1].content).toContain('>> [');
     expect(calls[1][1].content).toMatch(/>> \[\d\d:\d\d\] third\?/);
+  });
+
+  it('waits for the continuation of a request split by a pause and answers it once', async () => {
+    const { chat, calls } = makeChat(() => ['S — Single Responsibility…']);
+    const { session } = makeSession({ chat, debounceMs: 30 });
+
+    session.onUtterance('1', 'дай название паттернов');
+    await new Promise((r) => setTimeout(r, 10));
+    session.onUtterance('2', 'на каждую букву SOLID');
+    await session.idle();
+
+    expect(calls).toHaveLength(1);
+    // Both parts are marked as the current request (>>).
+    expect(calls[0][1].content).toMatch(/>> \[\d\d:\d\d\] дай название паттернов/);
+    expect(calls[0][1].content).toMatch(/>> \[\d\d:\d\d\] на каждую букву SOLID/);
   });
 
   it('includes relevant memory facts and survives memory failures', async () => {
@@ -170,6 +186,18 @@ describe('buildAssistantMessages', () => {
   it('tells the model to read transliterated terms phonetically and to explain bare terms', () => {
     const [system] = buildAssistantMessages({ conversation: [u('доминос')], memory: [], forced: false });
     expect(system.content).toContain('transliterated');
-    expect(system.content).toContain('bare term');
+    expect(system.content).toContain('NOTHING BUT a single term');
+  });
+});
+
+describe('currentRequestStart', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { currentRequestStart } = require('./assistant-prompt');
+  const at = (s: number) => ({ id: String(s), text: 'x', at: new Date(s * 1000) });
+
+  it('groups utterances finished within 4 s into the latest request', () => {
+    expect(currentRequestStart([at(0), at(20), at(22), at(25)])).toBe(1);
+    expect(currentRequestStart([at(0), at(10)])).toBe(1);
+    expect(currentRequestStart([at(0)])).toBe(0);
   });
 });

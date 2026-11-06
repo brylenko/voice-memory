@@ -25,6 +25,8 @@ export interface LiveAssistantDeps {
   log?: (msg: string) => void;
   /** Decision trace (skip / answer), for diagnostics. Never receives user text. */
   trace?: (msg: string) => void;
+  /** Wait this long after an utterance for a continuation before answering (auto mode). */
+  debounceMs?: number;
 }
 
 export interface LiveAssistantContext {
@@ -71,7 +73,20 @@ export class LiveAssistantSession {
       return;
     }
     this.window.add({ id, text: text.trim(), at });
-    if (this.mode === 'auto') this.schedule(false);
+    if (this.mode === 'auto') this.scheduleDebounced();
+  }
+
+  private debounceTimer: NodeJS.Timeout | null = null;
+
+  /** A pause mid-sentence splits one request into utterances: answer once, after it's complete. */
+  private scheduleDebounced(): void {
+    const delay = this.deps.debounceMs ?? 700;
+    if (delay <= 0) { this.schedule(false); return; }
+    if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      this.schedule(false);
+    }, delay);
   }
 
   /** User explicitly asked for an answer about what was just said. */
@@ -81,13 +96,15 @@ export class LiveAssistantSession {
   }
 
   close(): void {
+    if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    this.debounceTimer = null;
     this.closed = true;
     this.pending = null;
   }
 
   /** Resolves once all scheduled evaluations have finished (used by tests / graceful close). */
   async idle(): Promise<void> {
-    while (this.running) await new Promise((r) => setTimeout(r, 5));
+    while (this.running || this.debounceTimer) await new Promise((r) => setTimeout(r, 5));
   }
 
   private schedule(forced: boolean): void {
