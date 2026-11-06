@@ -11,7 +11,10 @@ import {
 import { DeviceUserResolver } from '../../../../user/device-user.resolver';
 import { LiveTrackService } from '../../../../streaming/live-track.service';
 import { WsAuthError, WsHmacAuthService } from '../../../../streaming/ws-hmac-auth.service';
+import { ConfigService } from '@nestjs/config';
 import { LiveAssistantFactory } from '../../../application/live-assistant.factory';
+import { SPEECH_SYNTHESIS_PORT, SpeechSynthesisPort } from '../../../../ai/ports/speech-synthesis.port';
+import { SpeechEvent, SpeechRelay } from './speech-relay';
 import { aiErrorCode } from '../../../../ai/ai-availability';
 import type {
   AssistantEvent,
@@ -21,7 +24,8 @@ import type {
 
 type ServerEvent =
   | AssistantEvent
-  | { type: 'ready'; mode: AssistantMode }
+  | SpeechEvent
+  | { type: 'ready'; mode: AssistantMode; serverTts: boolean }
   | { type: 'partial'; id: string; text: string }
   | { type: 'utterance'; id: string; text: string }
   | { type: 'done'; trackId?: string }
@@ -30,6 +34,7 @@ type ServerEvent =
 interface Connection {
   audio: Readable;
   assistant?: LiveAssistantSession;
+  speech?: SpeechRelay;
 }
 
 /** Hard cap on buffered pre-auth audio (~10 s of PCM16 @ 24 kHz). */
@@ -44,6 +49,7 @@ const MAX_PENDING_BYTES = 24_000 * 2 * 10;
  *   binary frames           — PCM16 mono 24 kHz (~100 ms per frame)
  *   {"type":"ask"}          — force an answer about the latest utterance
  *   {"type":"mode","mode":"auto"|"manual"} — switch mode on the fly
+ *   {"type":"speak","enabled":true|false}  — speak answers with the server voice
  *   "end"                   — stop listening (flush + close)
  *
  * Server → client:
@@ -54,6 +60,8 @@ const MAX_PENDING_BYTES = 24_000 * 2 * 10;
  *   {"type":"answer.delta","id","text"}
  *   {"type":"answer.done","id","text"}
  *   {"type":"answer.error","id","message"}
+ *   {"type":"speech.start","id","encoding","sampleRate","channels"} → binary PCM frames →
+ *   {"type":"speech.end","id","interrupted"?} | {"type":"speech.error","id","code"?}
  *   {"type":"done","trackId"?}                     — session saved (when save=1)
  *   {"type":"error","message","paymentUrl"?}
  *
@@ -71,7 +79,13 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
     private readonly users: DeviceUserResolver,
     private readonly liveTracks: LiveTrackService,
     private readonly wsAuth: WsHmacAuthService,
+    @Inject(SPEECH_SYNTHESIS_PORT) private readonly tts: SpeechSynthesisPort,
+    private readonly config: ConfigService,
   ) {}
+
+  private get serverTts(): boolean {
+    return this.config.get<boolean>('assistant.serverTts') ?? true;
+  }
 
   handleConnection(client: WebSocket, req: IncomingMessage): void {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
@@ -123,11 +137,23 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
           client.close();
           return;
         }
-        conn.assistant = this.assistants.create({ userId, mode }, (e) => this.send(client, e));
+        if (this.serverTts) {
+          conn.speech = new SpeechRelay(
+            this.tts,
+            (e) => this.send(client, e),
+            (pcm) => { if (client.readyState === WebSocket.OPEN) client.send(pcm, { binary: true }); },
+            (msg) => this.logger.warn(msg),
+          );
+        }
+        conn.assistant = this.assistants.create({ userId, mode }, (e) => {
+          this.send(client, e);
+          // Speak the finished answer with the server voice (if the watch asked for it).
+          if (e.type === 'answer.done') void conn.speech?.speak(e.id, e.text);
+        });
         authorized = true;
         for (const frame of pending) conn.audio.push(frame);
         pending.length = 0;
-        this.send(client, { type: 'ready', mode });
+        this.send(client, { type: 'ready', mode, serverTts: this.serverTts });
         void this.runSession(client, conn, userId, { lang, save });
       })
       .catch((err: Error) => {
@@ -141,6 +167,7 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
     const conn = this.connections.get(client);
     if (!conn) return;
     conn.assistant?.close();
+    conn.speech?.stop();
     conn.audio.push(null);
     this.connections.delete(client);
   }
@@ -150,10 +177,14 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
       conn.audio.push(null);
       return;
     }
-    let msg: { type?: string; mode?: string };
+    let msg: { type?: string; mode?: string; enabled?: boolean };
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'ask') conn.assistant?.askNow();
+    if (msg.type === 'speak' && conn.speech) {
+      conn.speech.enabled = msg.enabled === true;
+      if (!conn.speech.enabled) conn.speech.stop();
+    }
     if (msg.type === 'mode' && (msg.mode === 'auto' || msg.mode === 'manual')) {
       conn.assistant?.setMode(msg.mode);
     }
