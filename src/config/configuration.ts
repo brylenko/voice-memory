@@ -41,6 +41,8 @@ export default () => ({
     // Server-side voice for answers (natural, multilingual) streamed to the watch as PCM.
     // When off, the watch falls back to its own (offline) TTS engine.
     serverTts: process.env.ASSISTANT_SERVER_TTS !== 'false',
+    // DEV ONLY: log what was heard and answered (private conversation content!). Default off.
+    debugLogText: process.env.ASSISTANT_DEBUG_LOG_TEXT === 'true',
     ttsModel: process.env.ASSISTANT_TTS_MODEL ?? 'gpt-4o-mini-tts',
     ttsVoice: process.env.ASSISTANT_TTS_VOICE ?? 'alloy',
   },

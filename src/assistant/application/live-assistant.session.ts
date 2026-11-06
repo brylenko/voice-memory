@@ -27,6 +27,8 @@ export interface LiveAssistantDeps {
   trace?: (msg: string) => void;
   /** Wait this long after an utterance for a continuation before answering (auto mode). */
   debounceMs?: number;
+  /** DEV ONLY: receives heard text and answers for debugging. Off unless explicitly enabled. */
+  debugText?: (msg: string) => void;
 }
 
 export interface LiveAssistantContext {
@@ -73,6 +75,7 @@ export class LiveAssistantSession {
       return;
     }
     this.window.add({ id, text: text.trim(), at });
+    this.deps.debugText?.(`heard: ${text.trim()}`);
     if (this.mode === 'auto') this.scheduleDebounced();
   }
 
@@ -163,6 +166,7 @@ export class LiveAssistantSession {
         this.emit({ type: 'answer.done', id: answerId, text: answer.trim() });
         this.echo.rememberAnswer(answer);
         this.deps.trace?.(`answered (${answer.trim().length} chars, forced=${forced})`);
+        this.deps.debugText?.(`answer: ${answer.trim()}`);
       }
     } catch (err) {
       this.deps.log?.(`answer failed: ${(err as Error).message}`);

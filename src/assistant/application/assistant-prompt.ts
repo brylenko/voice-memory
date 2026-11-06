@@ -44,7 +44,9 @@ const AUTO_RULES = [
 ];
 
 const FORCED_RULES = [
-  'The user explicitly tapped "Answer" on the watch: give the most useful short answer, fact or hint about the latest topic.',
+  'The user explicitly tapped "Answer" on the watch. If the >> lines contain a request or question, answer exactly that,',
+  'following the length rules above (a requested list = the complete list). Only if there is no request at all,',
+  'give the most useful short fact or hint about the latest topic.',
   `Do not reply ${SKIP_TOKEN}.`,
 ];
 

@@ -30,6 +30,7 @@ export class LiveAssistantFactory {
         memory: useMemory ? this.memory : null,
         log: (msg) => this.logger.warn(msg),
         trace: (msg) => this.logger.log(msg),
+        ...(this.config.get<boolean>('assistant.debugLogText') ? { debugText: (msg: string) => this.logger.log(`[debug-text] ${msg}`) } : {}),
       },
       ctx,
       emit,

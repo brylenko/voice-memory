@@ -69,6 +69,7 @@ describe('LiveAssistantSession', () => {
     await session.idle();
     expect(calls).toHaveLength(1);
     expect(calls[0][0].content).toContain('explicitly tapped');
+    expect(calls[0][0].content).toContain('the complete list');
     expect(events.at(-1)).toMatchObject({ type: 'answer.done', text: 'Hint.' });
   });
 
