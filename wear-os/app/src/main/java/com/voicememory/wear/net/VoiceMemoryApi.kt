@@ -72,7 +72,7 @@ class VoiceMemoryApi(
         )
         UploadTicket(
             trackId = res.getString("trackId"),
-            uploadUrl = res.getString("uploadUrl"),
+            uploadUrl = UploadUrls.forDevice(res.getString("uploadUrl"), baseUrl),
             expiresAtMs = System.currentTimeMillis() + res.optLong("expiresInSeconds", 900) * 1000,
         )
     }
