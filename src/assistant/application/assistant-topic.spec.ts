@@ -15,7 +15,8 @@ describe('assistant topics', () => {
       conversation: [u('назови паттерн на каждую букву SOLID')], memory: [], forced: false, topic: 'interview_it',
     });
     expect(system.content).toContain('job interview');
-    expect(system.content).toContain('embody each');
+    expect(system.content).toContain('NEVER a letter game');
+    expect(system.content).toContain('for EACH SOLID PRINCIPLE');
     expect(topicTranscriptionHint('interview_it')).toContain('design patterns');
   });
 
