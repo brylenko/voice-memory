@@ -157,7 +157,7 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
         for (const frame of pending) conn.audio.push(frame);
         pending.length = 0;
         this.send(client, { type: 'ready', mode, serverTts: this.serverTts });
-        void this.runSession(client, conn, userId, { lang, save, promptHint: topicTranscriptionHint(topic) });
+        void this.runSession(client, conn, userId, { lang, save, topic, promptHint: topicTranscriptionHint(topic) });
       })
       .catch((err: Error) => {
         this.logger.error(`resolveUser failed: ${err.message}`);
@@ -184,7 +184,11 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'ask') conn.assistant?.askNow();
-    if (msg.type === 'topic') conn.assistant?.setTopic(parseTopic(msg.id));
+    if (msg.type === 'topic') {
+      const topic = parseTopic(msg.id);
+      this.logger.log(`assistant topic changed → ${topic}`);
+      conn.assistant?.setTopic(topic);
+    }
     if (msg.type === 'speak' && conn.speech) {
       conn.speech.enabled = msg.enabled === true;
       if (!conn.speech.enabled) conn.speech.stop();
@@ -198,10 +202,13 @@ export class AssistantGateway implements OnGatewayConnection, OnGatewayDisconnec
     client: WebSocket,
     conn: Connection,
     userId: string,
-    opts: { lang?: string; save: boolean; promptHint?: string },
+    opts: { lang?: string; save: boolean; promptHint?: string; topic: string },
   ): Promise<void> {
     const transcript: string[] = [];
-    this.logger.log(`assistant session started (save=${opts.save})`);
+    this.logger.log(
+      `assistant session started (save=${opts.save}, topic=${opts.topic}, model=${this.config.get('assistant.model')}, ` +
+      `webSearch=${this.config.get('assistant.webSearch')})`,
+    );
     const trackId = opts.save ? await this.liveTracks.start(userId, 'wear-assist') : undefined;
 
     try {
