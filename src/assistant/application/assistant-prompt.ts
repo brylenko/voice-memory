@@ -3,16 +3,24 @@ import { SKIP_TOKEN } from './answer-gate';
 import type { HeardUtterance } from './conversation-window';
 import type { MemoryFact } from './ports/memory-context.port';
 
-/** Hard cap so an answer always fits a round watch face without scrolling forever. */
-export const MAX_ANSWER_CHARS = 220;
+/** Length of an unsolicited hint: readable at a glance on a round watch face. */
+export const SHORT_ANSWER_CHARS = 220;
+/** Length of a full answer the user explicitly asked for (list, description, explanation). */
+export const LONG_ANSWER_CHARS = 900;
+/** Hard stop for a runaway generation (the model ignoring the limits above). */
+export const MAX_ANSWER_CHARS = LONG_ANSWER_CHARS + 300;
 
 const BASE_RULES = [
   'You are a discreet real-time assistant running on the user\'s smartwatch.',
   'You hear the live conversation around the user. The transcript comes from speech recognition and may contain errors.',
   'Speech often mixes languages: an English word or brand may appear transliterated (e.g. "асид" = acid, "доминос" = Domino\'s).',
   'Interpret words by how they sound and answer about what was most likely meant.',
-  `Keep every answer to at most 2 short sentences (under ${MAX_ANSWER_CHARS} characters): it is read at a glance on a small round screen.`,
-  'No preamble, no markdown, no lists. Answer in the language of the conversation.',
+  'Answer length depends on what was asked:',
+  `- a hint you offer on your own, or a simple factual question: at most 2 short sentences (under ${SHORT_ANSWER_CHARS} characters);`,
+  '- an explicit request to list, describe, explain, compare or give steps ("перечисли", "опиши", "расскажи", "объясни",',
+  `  "назови все", "N пунктов"): answer it COMPLETELY — every item asked for — but compactly, under ${LONG_ANSWER_CHARS} characters.`,
+  '  For lists write one short line per item: "1. Name — what it means". Never replace the requested list with a definition.',
+  'No preamble, no markdown (plain numbering is fine). Answer in the language of the conversation.',
   'If "Personal memory" contains something relevant, use it and say when it was heard. Never invent personal facts.',
   'You can search the web. Do it for anything current or local: prices, availability, news, weather, schedules,',
   'exchange rates, opening hours — and always when asked to look something up ("посмотри в интернете", "найди", "сколько стоит").',

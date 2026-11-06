@@ -161,6 +161,12 @@ describe('buildAssistantMessages', () => {
   const { buildAssistantMessages } = require('./assistant-prompt');
   const u = (text: string) => ({ id: '1', text, at: new Date('2026-11-06T10:00:00Z') });
 
+  it('allows complete answers when the user explicitly asks for a list', () => {
+    const [system] = buildAssistantMessages({ conversation: [u('опиши 9 пунктов GRASP')], memory: [], forced: false });
+    expect(system.content).toContain('COMPLETELY');
+    expect(system.content).toContain('one short line per item');
+  });
+
   it('tells the model to read transliterated terms phonetically and to explain bare terms', () => {
     const [system] = buildAssistantMessages({ conversation: [u('доминос')], memory: [], forced: false });
     expect(system.content).toContain('transliterated');

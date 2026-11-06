@@ -172,8 +172,15 @@ private fun AnswerCard(answer: Answer, latest: Boolean) {
     Card(onClick = {}, modifier = Modifier.fillMaxWidth()) {
         Text(
             text = answer.text.ifBlank { "…" },
-            style = if (latest) MaterialTheme.typography.title3 else MaterialTheme.typography.body2,
+            // Short hint: large, glanceable. Long answer (a requested list): normal size, scroll with the crown.
+            style = when {
+                !latest -> MaterialTheme.typography.body2
+                answer.text.length > LONG_ANSWER_THRESHOLD -> MaterialTheme.typography.body1
+                else -> MaterialTheme.typography.title3
+            },
             color = if (latest) MaterialTheme.colors.onSurface else MaterialTheme.colors.onSurfaceVariant,
         )
     }
 }
+
+private const val LONG_ANSWER_THRESHOLD = 160

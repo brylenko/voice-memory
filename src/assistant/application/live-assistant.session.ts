@@ -140,7 +140,7 @@ export class LiveAssistantSession {
         }
         answer += delta;
         this.emit({ type: 'answer.delta', id: answerId, text: delta });
-        if (answer.length > MAX_ANSWER_CHARS * 2) break; // runaway guard
+        if (answer.length > MAX_ANSWER_CHARS) break; // runaway guard
       }
       if (started && !this.closed) {
         this.emit({ type: 'answer.done', id: answerId, text: answer.trim() });
