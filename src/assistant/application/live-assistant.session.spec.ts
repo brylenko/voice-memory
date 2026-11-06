@@ -181,7 +181,9 @@ describe('buildAssistantMessages', () => {
   it('allows complete answers when the user explicitly asks for a list', () => {
     const [system] = buildAssistantMessages({ conversation: [u('опиши 9 пунктов GRASP')], memory: [], forced: false });
     expect(system.content).toContain('COMPLETELY');
-    expect(system.content).toContain('one short line per item');
+    expect(system.content).toContain('each item on its own line');
+    expect(system.content).toContain('literally');
+    expect(system.content).not.toContain('Single Responsibility'); // no misleading acronym example
   });
 
   it('tells the model to read transliterated terms phonetically and to explain bare terms', () => {
