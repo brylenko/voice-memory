@@ -48,6 +48,7 @@ private object Routes {
     const val HOME = "home"
     const val ASSIST = "assist"
     const val TODAY = "today"
+    const val TOPIC = "topic"
 }
 
 @Composable
@@ -76,9 +77,14 @@ fun WearApp(
                 )
             }
             composable(Routes.ASSIST) {
-                AssistScreen(micGranted, requestMic, keepScreenOn, onFinished = { nav.popBackStack() })
+                AssistScreen(
+                    micGranted, requestMic, keepScreenOn,
+                    onFinished = { nav.popBackStack() },
+                    openTopics = { nav.navigate(Routes.TOPIC) },
+                )
             }
             composable(Routes.TODAY) { TodayScreen() }
+            composable(Routes.TOPIC) { TopicScreen(onPicked = { nav.popBackStack() }) }
         }
     }
 }

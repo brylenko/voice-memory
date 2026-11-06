@@ -10,11 +10,14 @@ import com.voicememory.wear.assist.AnswerFeedback
 import com.voicememory.wear.assist.AssistMode
 import com.voicememory.wear.assist.AssistSession
 import com.voicememory.wear.assist.AssistState
+import com.voicememory.wear.assist.AssistTopic
+import com.voicememory.wear.assist.TopicSettings
 import com.voicememory.wear.memory.MemoryRecorderService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -51,8 +54,15 @@ class AssistViewModel(app: Application) : AndroidViewModel(app) {
         started = true
         // Only one AudioRecord at a time: memory mode hands the mic over while we answer.
         MemoryRecorderService.sendIfRunning(getApplication(), MemoryRecorderService.ACTION_PAUSE)
-        session.start(mode, save)
+        TopicSettings.load(getApplication())
+        session.start(mode, save, TopicSettings.topic.value)
+        // Topic picked on its own screen while we're connected → apply without reconnecting.
+        viewModelScope.launch {
+            TopicSettings.topic.drop(1).collect { session.setTopic(it) }
+        }
     }
+
+    val topic: StateFlow<AssistTopic> = TopicSettings.topic
 
     fun ask() = session.askNow()
 

@@ -123,12 +123,14 @@ class VoiceMemoryApi(
         save: Boolean,
         language: String?,
         listener: WebSocketListener,
+        topic: String = "none",
     ): WebSocket {
         val url = "$baseUrl/assist/live".toHttpUrl().newBuilder().apply {
             signer.wsQuery().forEach { (k, v) -> addQueryParameter(k, v) }
             addQueryParameter("mode", mode)
             if (save) addQueryParameter("save", "1")
             if (language != null) addQueryParameter("lang", language)
+            if (topic != "none") addQueryParameter("topic", topic)
         }.build()
         // OkHttp accepts http(s) URLs for WebSockets and upgrades them itself.
         return http.newWebSocket(Request.Builder().url(url).build(), listener)

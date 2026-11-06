@@ -34,6 +34,8 @@ import com.voicememory.wear.assist.Answer
 import com.voicememory.wear.assist.AnswerFeedback
 import com.voicememory.wear.assist.AssistMode
 import com.voicememory.wear.assist.AssistState
+import com.voicememory.wear.assist.AssistTopic
+import com.voicememory.wear.assist.TopicSettings
 import com.voicememory.wear.assist.ConnectionStatus
 
 /**
@@ -51,11 +53,13 @@ internal fun AssistScreen(
     requestMic: () -> Unit,
     keepScreenOn: (Boolean) -> Unit,
     onFinished: () -> Unit,
+    openTopics: () -> Unit,
     vm: AssistViewModel = viewModel(),
 ) {
     val state by vm.state.collectAsStateWithLifecycle()
     val speak by vm.speak.collectAsStateWithLifecycle()
     val speechProblem by vm.speechProblem.collectAsStateWithLifecycle()
+    val topic by vm.topic.collectAsStateWithLifecycle()
 
     LaunchedEffect(micGranted) { if (micGranted) vm.start() else requestMic() }
     DisposableEffect(Unit) {
@@ -65,7 +69,7 @@ internal fun AssistScreen(
     LaunchedEffect(state.status) { if (state.status == ConnectionStatus.DONE) onFinished() }
 
     WatchList {
-        item { StatusLine(state) }
+        item { StatusLine(state, topic) }
         if (speak && speechProblem != null) {
             item {
                 Text(
@@ -137,6 +141,14 @@ internal fun AssistScreen(
 
         item {
             CompactChip(
+                onClick = openTopics,
+                label = { Text(stringResource(R.string.topic_chip, stringResource(topic.label)), maxLines = 1) },
+                colors = ChipDefaults.secondaryChipColors(),
+            )
+        }
+
+        item {
+            CompactChip(
                 onClick = { if (state.status == ConnectionStatus.ERROR) onFinished() else vm.stop() },
                 label = { Text(stringResource(R.string.stop)) },
                 colors = ChipDefaults.secondaryChipColors(),
@@ -146,8 +158,9 @@ internal fun AssistScreen(
 }
 
 @Composable
-private fun StatusLine(state: AssistState) {
-    val mode = stringResource(if (state.mode == AssistMode.AUTO) R.string.auto else R.string.manual)
+private fun StatusLine(state: AssistState, topic: AssistTopic) {
+    val mode = stringResource(if (state.mode == AssistMode.AUTO) R.string.auto else R.string.manual) +
+        if (topic != AssistTopic.NONE) " · " + stringResource(topic.label) else ""
     val text = when (state.status) {
         ConnectionStatus.CONNECTING -> stringResource(R.string.connecting)
         ConnectionStatus.ERROR -> if (state.aiUnavailable) {
@@ -184,3 +197,24 @@ private fun AnswerCard(answer: Answer, latest: Boolean) {
 }
 
 private const val LONG_ANSWER_THRESHOLD = 160
+
+/** Picks the conversation context; the assistant applies it immediately. */
+@Composable
+internal fun TopicScreen(onPicked: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(Unit) { TopicSettings.load(context) }
+    val current by TopicSettings.topic.collectAsStateWithLifecycle()
+    WatchList {
+        item { Text(stringResource(R.string.topic_title), style = MaterialTheme.typography.title3) }
+        AssistTopic.entries.forEach { t ->
+            item {
+                androidx.wear.compose.material.Chip(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { TopicSettings.set(context, t); onPicked() },
+                    label = { Text(stringResource(t.label)) },
+                    colors = if (t == current) ChipDefaults.primaryChipColors() else ChipDefaults.secondaryChipColors(),
+                )
+            }
+        }
+    }
+}

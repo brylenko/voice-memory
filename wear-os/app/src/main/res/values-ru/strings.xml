@@ -35,4 +35,12 @@
     <string name="tts_no_engine">Озвучка недоступна: на часах нет движка синтеза речи</string>
     <string name="tts_no_voice">Нет голоса для этого языка — установите в Настройках → Синтез речи</string>
     <string name="quick_assist_label">VM Ассистент</string>
+    <string name="topic_none">Без темы</string>
+    <string name="topic_interview_it">IT-собеседование</string>
+    <string name="topic_work_it">Работа (IT)</string>
+    <string name="topic_study">Учёба</string>
+    <string name="topic_medicine">Медицина</string>
+    <string name="topic_shopping">Покупки</string>
+    <string name="topic_chip">Тема: %1$s</string>
+    <string name="topic_title">Тема разговора</string>
 </resources>

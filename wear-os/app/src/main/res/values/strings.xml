@@ -36,4 +36,12 @@
     <string name="tts_no_engine">Speech unavailable: no TTS engine on the watch</string>
     <string name="tts_no_voice">No voice for this language — install it in Settings → Text-to-speech</string>
     <string name="quick_assist_label">VM Assistant</string>
+    <string name="topic_none">No topic</string>
+    <string name="topic_interview_it">IT interview</string>
+    <string name="topic_work_it">Work (IT)</string>
+    <string name="topic_study">Study</string>
+    <string name="topic_medicine">Medicine</string>
+    <string name="topic_shopping">Shopping</string>
+    <string name="topic_chip">Topic: %1$s</string>
+    <string name="topic_title">Conversation topic</string>
 </resources>

@@ -46,9 +46,9 @@ class AssistSession(
     private var micJob: Job? = null
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
-    fun start(mode: AssistMode, save: Boolean) {
+    fun start(mode: AssistMode, save: Boolean, topic: AssistTopic = AssistTopic.NONE) {
         _state.value = AssistState(status = ConnectionStatus.CONNECTING, mode = mode)
-        socket = api.openAssistant(mode.wire, save, language, listener)
+        socket = api.openAssistant(mode.wire, save, language, listener, topic.wire)
         micJob = scope.launch(Dispatchers.Default) { // PCM → bytes off the main thread
             // Frames are streamed immediately; the server buffers them until auth completes.
             PcmRecorder.frames(SAMPLE_RATE, FRAME_MS).collect { frame ->
@@ -62,6 +62,11 @@ class AssistSession(
 
     fun askNow() {
         socket?.send(JSONObject().put("type", "ask").toString())
+    }
+
+    /** Change the conversation context without reconnecting. */
+    fun setTopic(topic: AssistTopic) {
+        socket?.send(JSONObject().put("type", "topic").put("id", topic.wire).toString())
     }
 
     /** Speak answers: with the server voice when available, else the caller's local TTS. */
